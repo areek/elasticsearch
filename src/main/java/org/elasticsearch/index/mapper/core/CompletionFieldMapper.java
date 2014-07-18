@@ -457,6 +457,11 @@ public class CompletionFieldMapper extends AbstractFieldMapper<String> {
     }
 
     @Override
+    public boolean supportsNullValue() {
+        return false;
+    }
+
+    @Override
     public FieldType defaultFieldType() {
         return Defaults.FIELD_TYPE;
     }
