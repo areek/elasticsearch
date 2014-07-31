@@ -32,8 +32,10 @@ import org.apache.lucene.search.suggest.Lookup.LookupResult;
 import org.apache.lucene.search.suggest.analyzing.AnalyzingSuggester;
 import org.apache.lucene.search.suggest.analyzing.XAnalyzingSuggester;
 import org.apache.lucene.store.*;
+import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.LineFileDocs;
+import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
 import org.elasticsearch.index.codec.postingsformat.Elasticsearch090PostingsFormat;
 import org.elasticsearch.index.codec.postingsformat.PostingsFormatProvider;
@@ -42,20 +44,15 @@ import org.elasticsearch.index.mapper.FieldMapper.Names;
 import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 import org.elasticsearch.index.mapper.core.CompletionFieldMapper;
 import org.elasticsearch.search.suggest.SuggestUtils;
-import org.elasticsearch.search.suggest.completion.Completion090PostingsFormat.LookupFactory;
 import org.elasticsearch.search.suggest.context.ContextMapping;
 import org.elasticsearch.test.ElasticsearchTestCase;
 import org.junit.Test;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.*;
 
 public class CompletionPostingsFormatTest extends ElasticsearchTestCase {
 
@@ -63,9 +60,9 @@ public class CompletionPostingsFormatTest extends ElasticsearchTestCase {
     public void testCompletionPostingsFormat() throws IOException {
         AnalyzingCompletionLookupProviderV1 providerV1 = new AnalyzingCompletionLookupProviderV1(true, false, true, true);
         AnalyzingCompletionLookupProvider currentProvider = new AnalyzingCompletionLookupProvider(true, false, true, true);
-        List<Completion090PostingsFormat.CompletionLookupProvider> providers = Lists.newArrayList(providerV1, currentProvider);
+        List<CompletionLookupProvider> providers = Lists.newArrayList(providerV1, currentProvider);
 
-        Completion090PostingsFormat.CompletionLookupProvider randomProvider = providers.get(getRandom().nextInt(providers.size()));
+        CompletionLookupProvider randomProvider = providers.get(getRandom().nextInt(providers.size()));
         RAMDirectory dir = new RAMDirectory();
         writeData(dir, randomProvider);
 
@@ -116,6 +113,7 @@ public class CompletionPostingsFormatTest extends ElasticsearchTestCase {
         assertThat(analyzingSuggestHolder.endByte, is(XAnalyzingSuggester.END_BYTE));
         dir.close();
     }
+
 
     @Test
     public void testDuellCompletions() throws IOException, NoSuchFieldException, SecurityException, IllegalArgumentException,
@@ -259,24 +257,28 @@ public class CompletionPostingsFormatTest extends ElasticsearchTestCase {
                         lookup.get(j).value, equalTo(refLookup.get(j).value));
                 assertThat(lookup.get(j).payload, equalTo(refLookup.get(j).payload));
                 if (usePayloads) {
-                    assertThat(lookup.get(j).payload.utf8ToString(),  equalTo(Long.toString(lookup.get(j).value)));    
+                    assertThat(lookup.get(j).payload.utf8ToString(),  equalTo(Long.toString(lookup.get(j).value)));
                 }
             }
         }
     }
 
-    public Lookup buildAnalyzingLookup(final CompletionFieldMapper mapper, String[] terms, String[] surfaces, long[] weights)
-            throws IOException {
-        RAMDirectory dir = new RAMDirectory();
+    private IndexWriter setupCompletionIndexWriter(final CompletionFieldMapper mapper, RAMDirectory dir) throws IOException {
         FilterCodec filterCodec = new FilterCodec("filtered", Codec.getDefault()) {
             public PostingsFormat postingsFormat() {
                 return mapper.postingsFormatProvider().get();
             }
         };
         IndexWriterConfig indexWriterConfig = new IndexWriterConfig(TEST_VERSION_CURRENT, mapper.indexAnalyzer());
-
         indexWriterConfig.setCodec(filterCodec);
-        IndexWriter writer = new IndexWriter(dir, indexWriterConfig);
+        return new IndexWriter(dir, indexWriterConfig);
+
+    }
+
+    public Lookup buildAnalyzingLookup(final CompletionFieldMapper mapper, String[] terms, String[] surfaces, long[] weights)
+            throws IOException {
+        RAMDirectory dir = new RAMDirectory();
+        IndexWriter writer = setupCompletionIndexWriter(mapper, dir);
         for (int i = 0; i < weights.length; i++) {
             Document doc = new Document();
             BytesRef payload = mapper.buildPayload(new BytesRef(surfaces[i]), weights[i], new BytesRef(Long.toString(weights[i])));
@@ -323,7 +325,7 @@ public class CompletionPostingsFormatTest extends ElasticsearchTestCase {
     }
 
     // TODO ADD more unittests
-    private void writeData(Directory dir, Completion090PostingsFormat.CompletionLookupProvider provider) throws IOException {
+    private void writeData(Directory dir, CompletionLookupProvider provider) throws IOException {
         IndexOutput output = dir.createOutput("foo.txt", IOContext.DEFAULT);
         FieldsConsumer consumer = provider.consumer(output);
         FieldInfo fieldInfo = new FieldInfo("foo", true, 1, false, true, true, IndexOptions.DOCS_AND_FREQS_AND_POSITIONS,
@@ -347,4 +349,5 @@ public class CompletionPostingsFormatTest extends ElasticsearchTestCase {
         output.close();
 
     }
+
 }
