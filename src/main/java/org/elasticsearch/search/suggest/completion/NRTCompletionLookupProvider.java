@@ -43,6 +43,12 @@ import java.util.*;
 
 import static org.elasticsearch.search.suggest.completion.AnalyzingCompletionLookupProvider.AnalyzingSuggestHolder;
 
+
+/**
+ * TODO:
+ *  - remove irrelevant codec versioning stuff
+ *  - general refactoring
+ */
 public class NRTCompletionLookupProvider extends CompletionLookupProvider {
 
     // for serialization
