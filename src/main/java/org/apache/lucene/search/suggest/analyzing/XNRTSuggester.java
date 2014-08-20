@@ -21,7 +21,9 @@ package org.apache.lucene.search.suggest.analyzing;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.TokenStreamToAutomaton;
+import org.apache.lucene.document.Document;
 import org.apache.lucene.index.AtomicReader;
+import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.search.suggest.InputIterator;
 import org.apache.lucene.search.suggest.Lookup;
 import org.apache.lucene.store.*;
@@ -339,9 +341,45 @@ public class XNRTSuggester extends Lookup {
     throw new UnsupportedOperationException();
   }
 
-  private LookupResult getLookupResult(Long output1, BytesRef output2, CharsRef spare) {
-    XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(output2, hasPayloads, payloadSep, spare);
-    return new LookupResult(spare.toString(), decodeWeight(output1), metaData.payload);
+  private LookupResult getLookupResult(CharsRef term, Long output1, BytesRef payload) {
+    return new LookupResult(term.toString(), decodeWeight(output1), payload);
+  }
+
+  private Map<String, List<String>> getPayloadFields(int docID, Set<String> payloadFieldNames, final AtomicReader reader) throws IOException {
+      if (payloadFieldNames != null) {
+          Map<String, List<String>> payloadFieldMap = new HashMap<>(payloadFieldNames.size());
+          final Document document = reader.document(docID, payloadFieldNames);
+          for (String payloadFieldName : payloadFieldNames) {
+              final IndexableField[] fieldVals = document.getFields(payloadFieldName);
+              List<String> values = null;
+              for (IndexableField fieldVal : fieldVals) {
+                  if (!payloadFieldMap.containsKey(payloadFieldName)) {
+                      values = new ArrayList<>(fieldVals.length);
+                  }
+                  values = (values == null) ? payloadFieldMap.get(payloadFieldName) : values;
+                  values.add(getFieldVal(fieldVal));
+
+                payloadFieldMap.put(payloadFieldName, values);
+
+              }
+
+          }
+          return payloadFieldMap;
+      }
+      return null;
+  }
+
+  private static String getFieldVal(IndexableField fieldVal) {
+      String val = fieldVal.stringValue();
+      if (val == null) {
+          BytesRef valBytes;
+          if ((valBytes = fieldVal.binaryValue()) != null) {
+              val = valBytes.utf8ToString();
+          } else if (fieldVal.numericValue() != null) {
+              val = String.valueOf(fieldVal.numericValue());
+          }
+      }
+      return val;
   }
 
   private boolean sameSurfaceForm(BytesRef key, BytesRef output2) {
@@ -368,29 +406,34 @@ public class XNRTSuggester extends Lookup {
 
   @Override
   public List<LookupResult> lookup(final CharSequence key, Set<BytesRef> contexts, boolean onlyMorePopular, int num) {
-      return lookup(key, contexts, onlyMorePopular, num, null, 1.0d);
+      return lookup(key, num, null, null);
   }
 
   public List<LookupResult> lookup(final CharSequence key, final int num, final AtomicReader reader) {
-      double liveDocRatio = 1.0d;
-      if (reader.numDocs() > 0) {
-        liveDocRatio = (double) reader.numDocs() / reader.maxDoc();
-      } else {
-        return Collections.emptyList();
-      }
-      return lookup(key, null, false, num, reader.getLiveDocs(), liveDocRatio);
+      return lookup(key, num, reader, null);
   }
 
-  private List<LookupResult> lookup(final CharSequence key, Set<BytesRef> contexts, boolean onlyMorePopular, int num, final Bits liveDocs, final double liveDocsRatio) {
+  private static double calculateLiveDocRatio(int numDocs, int maxDocs) {
+      return (numDocs > 0) ? ((double) numDocs / maxDocs) : -1;
+  }
+
+  private List<LookupResult> lookup(final CharSequence key, int num, final AtomicReader reader, Set<String> payloadFields) {
     assert num > 0;
 
-    if (onlyMorePopular) {
-      throw new IllegalArgumentException("this suggester only works with onlyMorePopular=false");
-    }
     if (fst == null) {
       return Collections.emptyList();
     }
 
+      final double liveDocsRatio = (reader != null) ? calculateLiveDocRatio(reader.numDocs(), reader.maxDoc()) : 1.0d;
+      if (liveDocsRatio == -1) {
+          return Collections.emptyList();
+      }
+
+    final Bits liveDocs = (reader != null) ? reader.getLiveDocs() : null;
+
+    if (payloadFields != null && reader == null) {
+        throw new IllegalArgumentException("can't retrieve payloads if reader=null");
+    }
     //System.out.println("lookup key=" + key + " num=" + num);
     for (int i = 0; i < key.length(); i++) {
       if (key.charAt(i) == holeCharacter) {
@@ -481,7 +524,8 @@ public class XNRTSuggester extends Lookup {
         for(Result<Pair<Long,BytesRef>> completion : completions) {
           BytesRef output2 = completion.output.output2;
           if (sameSurfaceForm(utf8Key, output2)) {
-            results.add(getLookupResult(completion.output.output1, output2, spare));
+            XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(output2, hasPayloads, payloadSep, spare);
+            results.add(getLookupResult(spare, completion.output.output1, metaData.payload));
             break;
           }
         }
@@ -546,8 +590,10 @@ public class XNRTSuggester extends Lookup {
       //assert completions.isComplete;
 
       for(Result<Pair<Long,BytesRef>> completion : completions) {
+        XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(completion.output.output2, hasPayloads, payloadSep, spare);
 
-        LookupResult result = getLookupResult(completion.output.output1, completion.output.output2, spare);
+          final Map<String, List<String>> payloadFieldsMap = getPayloadFields(metaData.docID, payloadFields, reader);
+          LookupResult result = getLookupResult(spare, completion.output.output1, metaData.payload);
 
         // TODO: for fuzzy case would be nice to return
         // how many edits were required
