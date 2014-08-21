@@ -359,7 +359,7 @@ public class XNRTSuggester extends Lookup {
                   values = (values == null) ? payloadFieldMap.get(payloadFieldName) : values;
                   values.add(getFieldVal(fieldVal));
 
-                payloadFieldMap.put(payloadFieldName, values);
+                  payloadFieldMap.put(payloadFieldName, values);
 
               }
 
@@ -593,6 +593,12 @@ public class XNRTSuggester extends Lookup {
         XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(completion.output.output2, hasPayloads, payloadSep, spare);
 
           final Map<String, List<String>> payloadFieldsMap = getPayloadFields(metaData.docID, payloadFields, reader);
+          System.out.println("PayloadFields: ");
+          for(Map.Entry<String, List<String>> entry : payloadFieldsMap.entrySet()) {
+              System.out.println("name: " + entry.getKey());
+              for(String s : entry.getValue())
+                  System.out.println("  vals: " + s);
+          }
           LookupResult result = getLookupResult(spare, completion.output.output1, metaData.payload);
 
         // TODO: for fuzzy case would be nice to return
