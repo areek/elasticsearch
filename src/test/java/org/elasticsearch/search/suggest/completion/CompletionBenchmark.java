@@ -46,7 +46,11 @@ import org.elasticsearch.test.ElasticsearchTestCase;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.Callable;
 
@@ -61,6 +65,8 @@ public class CompletionBenchmark extends ElasticsearchTestCase {
     private final static int maxDataSize = 5000;
 
     private final static Random random = new Random(0xdeadbeef);
+
+    private final static boolean useTopWiki = false; // for some reason Top50KWiki gives way higher QPS!
 
     private static class Input {
         private String term;
@@ -88,32 +94,63 @@ public class CompletionBenchmark extends ElasticsearchTestCase {
             false, false, Integer.MAX_VALUE, AbstractFieldMapper.MultiFields.empty(), null, ContextMapping.EMPTY_MAPPING);
 
     @BeforeClass
-    public static void setup() throws IOException {
-        LineFileDocs docs = new LineFileDocs(null);
-        Set<String> seen = new HashSet<>();
-        for (int i = 0; i < maxDataSize; i++) {
-            Document nextDoc = docs.nextDoc();
-            IndexableField field = nextDoc.getField("title");
-            String term = field.stringValue();
-            if (seen.contains(term)) {
-                continue;
-            } else {
-                seen.add(term);
+    public static void setup() throws Exception {
+        if (!useTopWiki) {
+            // data set with longer terms to suggest
+            LineFileDocs docs = new LineFileDocs(null);
+            Set<String> seen = new HashSet<>();
+            for (int i = 0; i < maxDataSize; i++) {
+                Document nextDoc = docs.nextDoc();
+                IndexableField field = nextDoc.getField("title");
+                String term = field.stringValue();
+                if (seen.contains(term)) {
+                    continue;
+                } else {
+                    seen.add(term);
+                }
+                int weight;
+                if ((weight = random.nextInt()) < 0) {
+                    // force positive weight
+                    weight *= -1;
+                }
+                Input input = new Input(term, weight);
+                CompletionBenchmark.benchmarkInput.add(input);
+                CompletionBenchmark.lookupInput.add(input);
             }
-            int weight;
-            if ((weight = random.nextInt()) < 0) {
-                // force positive weight
-                weight *= -1;
-            }
-            Input input = new Input(term, weight);
-            CompletionBenchmark.benchmarkInput.add(input);
-            CompletionBenchmark.lookupInput.add(input);
+            Collections.shuffle(CompletionBenchmark.lookupInput, random);
+            assert CompletionBenchmark.benchmarkInput.size() == CompletionBenchmark.lookupInput.size();
+            docs.close();
+        } else {
+            List<Input> input = readTop50KWiki();
+            Collections.shuffle(input, random);
+            CompletionBenchmark.lookupInput = input;
+            Collections.shuffle(input, random);
+            CompletionBenchmark.benchmarkInput = input;
         }
-        Collections.shuffle(CompletionBenchmark.lookupInput, random);
-        assert CompletionBenchmark.benchmarkInput.size() == CompletionBenchmark.lookupInput.size();
-        docs.close();
     }
 
+    static final Charset UTF_8 = StandardCharsets.UTF_8;
+
+    /**
+     * Collect the multilingual input for benchmarks/ tests.
+     */
+    public static List<Input> readTop50KWiki() throws Exception {
+        List<Input> input = new ArrayList<>();
+
+        BufferedReader br = new BufferedReader(new InputStreamReader(
+                CompletionBenchmark.class.getResourceAsStream("/org/elasticsearch/search.suggest.completion/Top50KWiki.utf8"), UTF_8));
+
+        String line = null;
+        while ((line = br.readLine()) != null) {
+            int tab = line.indexOf('|');
+            assertTrue("No | separator?: " + line, tab >= 0);
+            int weight = Integer.parseInt(line.substring(tab + 1));
+            String key = line.substring(0, tab);
+            input.add(new Input(key, weight));
+        }
+        br.close();
+        return input;
+    }
 
     /**
      * Test performance of lookup on full hits.
@@ -164,7 +201,7 @@ public class CompletionBenchmark extends ElasticsearchTestCase {
                 final Map.Entry<Lookup, AtomicReader> nrtLookupEntry = completionProvider.getNRTLookup();
                 Lookup nrtLookup = nrtLookupEntry.getKey();
                 AtomicReader reader = nrtLookupEntry.getValue();
-                runNRTPerfTest(nrtLookup, reader, 2, 4);
+                runNRTPerfTest(nrtLookup, reader, minPrefixLen, maxPrefixLen);
                 reader.close();
                 completionProvider.close();
             }
