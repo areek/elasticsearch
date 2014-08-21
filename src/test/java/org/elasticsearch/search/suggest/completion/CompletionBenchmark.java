@@ -28,6 +28,7 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.suggest.InputIterator;
 import org.apache.lucene.search.suggest.Lookup;
+import org.apache.lucene.search.suggest.analyzing.AnalyzingSuggester;
 import org.apache.lucene.search.suggest.analyzing.XAnalyzingSuggester;
 import org.apache.lucene.search.suggest.analyzing.XNRTSuggester;
 import org.apache.lucene.store.RAMDirectory;
@@ -291,7 +292,7 @@ public class CompletionBenchmark extends ElasticsearchTestCase {
 
 
     private Lookup buildAnalyzingLookup(boolean validate) throws IOException {
-        XAnalyzingSuggester suggester = new XAnalyzingSuggester(analyzer);
+        AnalyzingSuggester suggester = new AnalyzingSuggester(analyzer);
         suggester.build(constructInputIterator(lookupInput, validate));
         return suggester;
     }
