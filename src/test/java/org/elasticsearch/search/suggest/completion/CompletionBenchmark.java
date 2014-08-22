@@ -30,6 +30,7 @@ import org.apache.lucene.search.suggest.InputIterator;
 import org.apache.lucene.search.suggest.Lookup;
 import org.apache.lucene.search.suggest.analyzing.AnalyzingSuggester;
 import org.apache.lucene.search.suggest.analyzing.XAnalyzingSuggester;
+import org.apache.lucene.search.suggest.analyzing.XLookup;
 import org.apache.lucene.search.suggest.analyzing.XNRTSuggester;
 import org.apache.lucene.store.RAMDirectory;
 import org.apache.lucene.util.BytesRef;
@@ -407,18 +408,31 @@ public class CompletionBenchmark extends ElasticsearchTestCase {
 
     private void runPerfTest(final String name, final Lookup lookup, int minPrefixLen, final int maxPrefixLen, final int num) {
         final List<String> inputs = generateInputs(minPrefixLen, maxPrefixLen);
-
-        BenchmarkResult result = measure(new Callable<Integer>() {
-            @Override
-            public Integer call() throws Exception {
-                int v = 0;
-                for (String term : inputs) {
-                    v += lookup.lookup(term, false, num).size();
+        BenchmarkResult result;
+        if (lookup instanceof XLookup) {
+            final XLookup xLookup = (XLookup) lookup;
+            result = measure(new Callable<Integer>() {
+                @Override
+                public Integer call() throws Exception {
+                    int v = 0;
+                    for (String term : inputs) {
+                        v += xLookup.lookup(term, num).size();
+                    }
+                    return v;
                 }
-                return v;
-            }
-        });
-
+            });
+        } else {
+            result = measure(new Callable<Integer>() {
+                @Override
+                public Integer call() throws Exception {
+                    int v = 0;
+                    for (String term : inputs) {
+                        v += lookup.lookup(term, false, num).size();
+                    }
+                    return v;
+                }
+            });
+        }
         System.out.println(
                 String.format(Locale.ROOT, "  %-15s queries: %d, time[ms]: %s, ~kQPS: %.0f",
                         name,

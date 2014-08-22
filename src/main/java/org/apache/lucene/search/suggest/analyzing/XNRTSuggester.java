@@ -24,11 +24,7 @@ import org.apache.lucene.analysis.TokenStreamToAutomaton;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.AtomicReader;
 import org.apache.lucene.index.IndexableField;
-import org.apache.lucene.search.suggest.InputIterator;
-import org.apache.lucene.search.suggest.Lookup;
 import org.apache.lucene.store.*;
-import org.apache.lucene.store.DataInput;
-import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.*;
 import org.apache.lucene.util.PriorityQueue;
 import org.apache.lucene.util.automaton.*;
@@ -37,7 +33,6 @@ import org.apache.lucene.util.fst.FST.BytesReader;
 import org.apache.lucene.util.fst.PairOutputs.Pair;
 import org.apache.lucene.util.fst.Util.Result;
 import org.apache.lucene.util.fst.Util.TopResults;
-import org.elasticsearch.common.bytes.BytesReference;
 
 import java.io.*;
 import java.util.*;
@@ -58,7 +53,7 @@ import java.util.*;
  *   
  * @lucene.experimental
  */
-public class XNRTSuggester extends Lookup {
+public class XNRTSuggester extends XLookup {
 
   /**
    * FST<Weight,Surface>: 
@@ -321,28 +316,8 @@ public class XNRTSuggester extends Lookup {
     return tsta;
   }
   
-  @Override
-  public void build(InputIterator iterator) throws IOException {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
-  public boolean store(OutputStream output) throws IOException {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
-  public long getCount() {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
-  public boolean load(InputStream input) throws IOException {
-    throw new UnsupportedOperationException();
-  }
-
-  private LookupResult getLookupResult(CharsRef term, Long output1, BytesRef payload) {
-    return new LookupResult(term.toString(), decodeWeight(output1), payload);
+  private XLookupResult getLookupResult(CharsRef term, Long output1, BytesRef payload) {
+    return new XLookupResult(term.toString(), decodeWeight(output1), payload);
   }
 
   private Map<String, List<String>> getPayloadFields(int docID, Set<String> payloadFieldNames, final AtomicReader reader) throws IOException {
@@ -405,11 +380,12 @@ public class XNRTSuggester extends Lookup {
   }
 
   @Override
-  public List<LookupResult> lookup(final CharSequence key, Set<BytesRef> contexts, boolean onlyMorePopular, int num) {
+  public List<XLookupResult> lookup(final CharSequence key, final int num) {
       return lookup(key, num, null, null);
   }
 
-  public List<LookupResult> lookup(final CharSequence key, final int num, final AtomicReader reader) {
+  @Override
+  public List<XLookupResult> lookup(final CharSequence key, final int num, final AtomicReader reader) {
       return lookup(key, num, reader, null);
   }
 
@@ -417,7 +393,7 @@ public class XNRTSuggester extends Lookup {
       return (numDocs > 0) ? ((double) numDocs / maxDocs) : -1;
   }
 
-  private List<LookupResult> lookup(final CharSequence key, int num, final AtomicReader reader, Set<String> payloadFields) {
+  public List<XLookupResult> lookup(final CharSequence key, int num, final AtomicReader reader, Set<String> payloadFields) {
     assert num > 0;
 
     if (fst == null) {
@@ -462,7 +438,7 @@ public class XNRTSuggester extends Lookup {
 
       FST.Arc<Pair<Long,BytesRef>> scratchArc = new FST.Arc<>();
 
-      final List<LookupResult> results = new ArrayList<>();
+      final List<XLookupResult> results = new ArrayList<>();
 
       List<FSTUtil.Path<Pair<Long,BytesRef>>> prefixPaths = FSTUtil.intersectPrefixPaths(convertAutomaton(lookupAutomaton), fst);
 
@@ -593,13 +569,15 @@ public class XNRTSuggester extends Lookup {
         XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(completion.output.output2, hasPayloads, payloadSep, spare);
 
           final Map<String, List<String>> payloadFieldsMap = getPayloadFields(metaData.docID, payloadFields, reader);
-          System.out.println("PayloadFields: ");
-          for(Map.Entry<String, List<String>> entry : payloadFieldsMap.entrySet()) {
-              System.out.println("name: " + entry.getKey());
-              for(String s : entry.getValue())
-                  System.out.println("  vals: " + s);
+          if (payloadFieldsMap != null) {
+              System.out.println("PayloadFields: ");
+              for (Map.Entry<String, List<String>> entry : payloadFieldsMap.entrySet()) {
+                  System.out.println("name: " + entry.getKey());
+                  for (String s : entry.getValue())
+                      System.out.println("  vals: " + s);
+              }
           }
-          LookupResult result = getLookupResult(spare, completion.output.output1, metaData.payload);
+          XLookupResult result = getLookupResult(spare, completion.output.output1, metaData.payload);
 
         // TODO: for fuzzy case would be nice to return
         // how many edits were required
@@ -633,16 +611,6 @@ public class XNRTSuggester extends Lookup {
     // liveDocRatio can be at most 1.0 (if no docs were deleted)
     assert liveDocRatio <= 1.0d;
     return Math.min(MAX_TOP_N_QUEUE_SIZE, (int) (maxQueueSize / liveDocRatio));
-  }
-
-  @Override
-  public boolean store(DataOutput output) throws IOException {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
-  public boolean load(DataInput input) throws IOException {
-    throw new UnsupportedOperationException();
   }
 
     /** Returns all completion paths to initialize the search. */
@@ -696,14 +664,7 @@ public class XNRTSuggester extends Lookup {
   
   
 
-  /**
-   * Returns the weight associated with an input string,
-   * or null if it does not exist.
-   */
-  public Object get(CharSequence key) {
-    throw new UnsupportedOperationException();
-  }
-  
+
   /** cost -> weight */
   public static int decodeWeight(long encoded) {
     return (int)(Integer.MAX_VALUE - encoded);

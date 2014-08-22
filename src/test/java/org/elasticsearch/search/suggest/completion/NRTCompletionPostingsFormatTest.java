@@ -22,7 +22,11 @@ package org.elasticsearch.search.suggest.completion;
 import com.google.common.collect.Lists;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.codecs.*;
+import org.apache.lucene.codecs.lucene49.Lucene49Codec;
+import org.apache.lucene.codecs.perfield.PerFieldPostingsFormat;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.*;
 import org.apache.lucene.index.FieldInfo.DocValuesType;
 import org.apache.lucene.index.FieldInfo.IndexOptions;
@@ -31,6 +35,7 @@ import org.apache.lucene.search.suggest.Lookup;
 import org.apache.lucene.search.suggest.Lookup.LookupResult;
 import org.apache.lucene.search.suggest.analyzing.AnalyzingSuggester;
 import org.apache.lucene.search.suggest.analyzing.XAnalyzingSuggester;
+import org.apache.lucene.search.suggest.analyzing.XLookup;
 import org.apache.lucene.search.suggest.analyzing.XNRTSuggester;
 import org.apache.lucene.store.*;
 import org.apache.lucene.util.Bits;
@@ -69,6 +74,37 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
         }
         return new String(chars);
     }
+
+
+    @Test
+    public void testREMOVE() throws Exception {
+        final boolean preserveSeparators = false;//getRandom().nextBoolean();
+        final boolean preservePositionIncrements = false;//getRandom().nextBoolean();
+        final boolean usePayloads = false;//getRandom().nextBoolean();
+        PostingsFormatProvider provider = new PreBuiltPostingsFormatProvider(new Elasticsearch090PostingsFormat());
+        NamedAnalyzer namedAnalzyer = new NamedAnalyzer("foo", new StandardAnalyzer(TEST_VERSION_CURRENT));
+        final NRTCompletionFieldMapper mapper = new NRTCompletionFieldMapper(new Names("foo"), namedAnalzyer, namedAnalzyer, provider, null, usePayloads,
+                preserveSeparators, preservePositionIncrements, Integer.MAX_VALUE, AbstractFieldMapper.MultiFields.empty(), null, ContextMapping.EMPTY_MAPPING);
+
+        final String[] titles = {"areek", "areel", "aryl", "blah"};
+        final long[] weights = {5,4,3,2};
+
+        CompletionProvider completionProvider = new CompletionProvider(mapper);
+        completionProvider.indexCompletions(titles, titles, weights);
+
+        IndexReader reader = completionProvider.getReader();
+        Tuple<XLookup, AtomicReader> lookupAtomicReaderTuple = completionProvider.getLookup(reader);
+        XLookup lookup = lookupAtomicReaderTuple.v1();
+        AtomicReader atomicReader = lookupAtomicReaderTuple.v2();
+        reader.close();
+
+        assertThat(lookup, instanceOf(XNRTSuggester.class));
+        XNRTSuggester suggester = (XNRTSuggester) lookup;
+        final HashSet<String> strings = new HashSet<String>(1);
+        strings.add("areek");
+        List<XLookup.XLookupResult> lookupResults = suggester.lookup("ar", 3, atomicReader, strings);
+    }
+
 
     @Test
     public void testNRTDeletedDocFiltering() throws IOException {
@@ -111,14 +147,14 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
         // delete some suggestions
         Map<String, Integer> deletedTerms = new HashMap<>();
         IndexReader reader = completionProvider.getReader();
-        Lookup lookup = completionProvider.getLookup(reader).v1();
+        XLookup lookup = completionProvider.getLookup(reader).v1();
         reader.close();
         assertTrue(lookup instanceof XNRTSuggester);
         XNRTSuggester suggester = (XNRTSuggester) lookup;
 
-        List<LookupResult> lookupResults = suggester.lookup(prefix, null, false, res);
+        List<XLookup.XLookupResult> lookupResults = suggester.lookup(prefix, res);
 
-        for (LookupResult result : lookupResults) {
+        for (XLookup.XLookupResult result : lookupResults) {
             if (randomBoolean()) {
                 String key = result.key.toString();
                 IndexReader indexReader = completionProvider.getReader();
@@ -134,7 +170,7 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
 
         // check if deleted suggestions are suggested
         reader = completionProvider.getReader();
-        Tuple<Lookup, AtomicReader> lookupAndReaderTuple = completionProvider.getLookup(reader);
+        Tuple<XLookup, AtomicReader> lookupAndReaderTuple = completionProvider.getLookup(reader);
         lookup = lookupAndReaderTuple.v1();
         AtomicReader atomicReader = lookupAndReaderTuple.v2();
 
@@ -144,7 +180,7 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
         lookupResults = suggesterWithDeletes.lookup(prefix, res, atomicReader);
 
         if (lookupResults.size() > 0) {
-            for(LookupResult result : lookupResults) {
+            for(XLookup.XLookupResult result : lookupResults) {
                 final String key = result.key.toString();
                 Integer counter = deletedTerms.get(key);
                 if (counter != null) {
@@ -204,14 +240,14 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
         for (int i = 0; i < Math.min(num, 256); i++) {
             int res = between(1, Math.min(num, 256));
             IndexReader reader = completionProvider.getReader();
-            final Tuple<Lookup, AtomicReader> lookupAndReader = completionProvider.getLookup(reader);
-            Lookup lookup = lookupAndReader.v1();
+            final Tuple<XLookup, AtomicReader> lookupAndReader = completionProvider.getLookup(reader);
+            XLookup lookup = lookupAndReader.v1();
             AtomicReader atomicReader = lookupAndReader.v2();
             assertTrue(lookup instanceof XNRTSuggester);
             XNRTSuggester suggester = (XNRTSuggester) lookup;
-            List<LookupResult> lookupResults = suggester.lookup(prefix, res, atomicReader);
+            List<XLookup.XLookupResult> lookupResults = suggester.lookup(prefix, res, atomicReader);
             reader.close();
-            for (LookupResult result : lookupResults) {
+            for (XLookup.XLookupResult result : lookupResults) {
                 String key = result.key.toString();
                 // check weight should be highest to lowest
                 assertThat(result.value, lessThanOrEqualTo(topScore));
@@ -345,7 +381,7 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
         CompletionProvider completionProvider = new CompletionProvider(mapper);
         completionProvider.indexCompletions(titles, titles, weights);
         IndexReader reader = completionProvider.getReader();
-        Lookup nrtLookup = completionProvider.getLookup(reader).v1();
+        XLookup nrtLookup = completionProvider.getLookup(reader).v1();
         assertThat(nrtLookup, instanceOf(XNRTSuggester.class));
         reader.close();
 
@@ -363,7 +399,7 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
             String firstTerm = builder.toString();
             String prefix = firstTerm.isEmpty() ? "" : firstTerm.substring(0, between(1, firstTerm.length()));
             List<LookupResult> refLookup = reference.lookup(prefix, false, res);
-            List<LookupResult> lookup = nrtLookup.lookup(prefix, false, res);
+            List<XLookup.XLookupResult> lookup = nrtLookup.lookup(prefix, res);
             assertThat(refLookup.toString(), lookup.size(), equalTo(refLookup.size()));
             for (int j = 0; j < refLookup.size(); j++) {
                 assertThat(lookup.get(j).key, equalTo(refLookup.get(j).key));
@@ -389,9 +425,13 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
 
 
         public CompletionProvider(final CompletionFieldMapper mapper) throws IOException {
-            FilterCodec filterCodec = new FilterCodec("filtered", Codec.getDefault()) {
-                public PostingsFormat postingsFormat() {
-                    return mapper.postingsFormatProvider().get();
+            Codec filterCodec = new Lucene49Codec() {
+                @Override
+                public PostingsFormat getPostingsFormatForField(String field) {
+                    if ("foo".equals(field)) {
+                        return mapper.postingsFormatProvider().get();
+                    }
+                    return super.getPostingsFormatForField(field);
                 }
             };
             this.indexWriterConfig = new IndexWriterConfig(TEST_VERSION_CURRENT, mapper.indexAnalyzer());
@@ -405,6 +445,7 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
                 Document doc = new Document();
                 BytesRef payload = mapper.buildPayload(new BytesRef(surfaces[i]), weights[i], new BytesRef(Long.toString(weights[i])));
                 doc.add(mapper.getCompletionField(ContextMapping.EMPTY_CONTEXT, terms[i], payload));
+                doc.add(new StringField("areek", "areef", Field.Store.YES));
                 if (randomBoolean()) {
                     writer.commit();
                 }
@@ -456,13 +497,13 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
             }
         }
 
-        public Tuple<Lookup, AtomicReader> getLookup(IndexReader reader) throws IOException {
+        public Tuple<XLookup, AtomicReader> getLookup(IndexReader reader) throws IOException {
             assertThat(reader.leaves().size(), equalTo(1));
             AtomicReader atomicReader = reader.leaves().get(0).reader();
             Terms luceneTerms = atomicReader.terms(mapper.name());
-            Lookup lookup = null;
+            XLookup lookup = null;
             if (luceneTerms instanceof Completion090PostingsFormat.CompletionTerms) {
-                lookup = ((Completion090PostingsFormat.CompletionTerms) luceneTerms).getLookup(mapper, new CompletionSuggestionContext(null));
+               lookup = (XLookup) ((Completion090PostingsFormat.CompletionTerms) luceneTerms).getLookup(mapper, new CompletionSuggestionContext(null));
             }
             assertFalse(lookup == null);
             return new Tuple<>(lookup, atomicReader);
