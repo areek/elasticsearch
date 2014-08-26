@@ -19,6 +19,7 @@
 
 package org.apache.lucene.search.suggest.analyzing;
 
+import org.apache.lucene.document.Document;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.AtomicReader;
 import org.apache.lucene.index.IndexableField;
@@ -28,6 +29,7 @@ import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.PriorityQueue;
+import org.elasticsearch.index.mapper.ParseContext;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -66,7 +68,7 @@ public abstract class XLookup extends Lookup {
         /** TODO */
         public final List<XStoredField> storedFields;
 
-        public static class XStoredField {
+        public static final class XStoredField {
 
             Object[] values;
             final int numValues;
@@ -79,7 +81,7 @@ public abstract class XLookup extends Lookup {
                 this.values = new Object[numValues];
 
                 for (IndexableField field : fields) {
-                    boolean valueAdded = add(field.stringValue()) | add(field.binaryValue()) | add(field.numericValue());
+                    boolean valueAdded = add(field.numericValue()) || add(field.binaryValue()) || add(field.stringValue());
                     if (!valueAdded) {
                         throw new UnsupportedOperationException("Field: " + name + " has to be of string or binary or number type");
                     }
@@ -92,11 +94,12 @@ public abstract class XLookup extends Lookup {
                 }
                 if (++index < numValues) {
                     this.values[index] = value;
-                    return true;
                 } else {
+                    assert false : "Object array size="+numValues+" attempting to add " + index+ " items";
                     //todo: think of a better Exception
-                    throw new ArrayIndexOutOfBoundsException("Already added " + numValues + " values");
+                    //throw new ArrayIndexOutOfBoundsException("Already added " + numValues + " values");
                 }
+                return true;
             }
 
             public List<Number> getNumericValues() {
@@ -142,8 +145,30 @@ public abstract class XLookup extends Lookup {
                 assert index == numValues - 1;
                 return values;
             }
+
+            @Override
+            public String toString() {
+                StringBuilder stringBuilder = new StringBuilder("<" + name + ":[");
+                for (int i=0; i < values.length; i++) {
+                    stringBuilder.append(values[i].toString());
+                    if (i != values.length-1) {
+                        stringBuilder.append(", ");
+                    }
+                }
+                stringBuilder.append("]");
+                return stringBuilder.toString();
+            }
         }
 
+        static List<XStoredField> getStoredFieldsFromDocument(final Document document, final Set<String> storedFieldNames) {
+            assert storedFieldNames != null;
+            assert document != null;
+            List<XStoredField> storedFields = new ArrayList<>(storedFieldNames.size());
+            for (String payloadFieldName : storedFieldNames) {
+                storedFields.add(new XStoredField(payloadFieldName, document.getFields(payloadFieldName)));
+            }
+            return storedFields;
+        }
 
         /**
          * Create a new result from a key+weight pair.

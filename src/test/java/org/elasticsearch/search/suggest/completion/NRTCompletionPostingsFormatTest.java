@@ -24,9 +24,7 @@ import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.codecs.*;
 import org.apache.lucene.codecs.lucene49.Lucene49Codec;
 import org.apache.lucene.codecs.perfield.PerFieldPostingsFormat;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.Field;
-import org.apache.lucene.document.StringField;
+import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
 import org.apache.lucene.index.FieldInfo.DocValuesType;
 import org.apache.lucene.index.FieldInfo.IndexOptions;
@@ -76,21 +74,69 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
     }
 
 
+    private Object[] generateStoredFields(int numStoredFields, Class[] types, String term, long weight) throws Exception {
+        Object[] values = new Object[numStoredFields];
+        for (int i = 0; i < numStoredFields; i++) {
+            Class type = types[i];
+            if (type == String.class) {
+                values[i] = randomUnicodeOfCodepointLengthBetween(2, 5) + term + randomUnicodeOfCodepointLengthBetween(2, 5);
+            } else if (type == BytesRef.class) {
+                values[i] = new BytesRef(randomUnicodeOfCodepointLengthBetween(2, 5) + term + randomUnicodeOfCodepointLengthBetween(2, 5));
+            } else if (type == Integer.class) {
+                values[i] = (int) weight;
+            } else if (type == Float.class) {
+                values[i] = (float) weight;
+            } else if (type == Double.class) {
+                values[i] = (double) weight;
+            } else if (type == Long.class) {
+                values[i] = weight;
+            } else {
+                throw new Exception("Unsupported type " + type);
+            }
+        }
+        return values;
+    }
+
     @Test
-    public void testREMOVE() throws Exception {
-        final boolean preserveSeparators = false;//getRandom().nextBoolean();
-        final boolean preservePositionIncrements = false;//getRandom().nextBoolean();
-        final boolean usePayloads = false;//getRandom().nextBoolean();
+    public void testArbitraryStoredFieldReturns() throws Exception {
+        final boolean preserveSeparators = getRandom().nextBoolean();
+        final boolean preservePositionIncrements = getRandom().nextBoolean();
+        final boolean usePayloads = getRandom().nextBoolean();
         PostingsFormatProvider provider = new PreBuiltPostingsFormatProvider(new Elasticsearch090PostingsFormat());
         NamedAnalyzer namedAnalzyer = new NamedAnalyzer("foo", new StandardAnalyzer(TEST_VERSION_CURRENT));
         final NRTCompletionFieldMapper mapper = new NRTCompletionFieldMapper(new Names("foo"), namedAnalzyer, namedAnalzyer, provider, null, usePayloads,
                 preserveSeparators, preservePositionIncrements, Integer.MAX_VALUE, AbstractFieldMapper.MultiFields.empty(), null, ContextMapping.EMPTY_MAPPING);
 
-        final String[] titles = {"areek", "areel", "aryl", "blah"};
-        final long[] weights = {5,4,3,2};
+
+        String prefixStr = generateRandomSuggestions(randomIntBetween(2, 6));
+        int num = scaledRandomIntBetween(200, 500);
+        int numStoredFields = scaledRandomIntBetween(1, 10);
+        Class[] types = new Class[numStoredFields];
+        String[] storedFieldNames = new String[numStoredFields];
+        Map<String, Class> storedFieldsToType = new HashMap<>(numStoredFields);
+        for (int i = 0; i < numStoredFields; i++) {
+            types[i] = randomFrom(String.class, Integer.class, Float.class, Double.class, Long.class, BytesRef.class);
+            String tempName = randomUnicodeOfCodepointLengthBetween(4, 10);
+            while (storedFieldsToType.containsKey(tempName)) {
+                tempName = randomUnicodeOfCodepointLengthBetween(4, 10);
+            }
+            storedFieldNames[i] = tempName;
+            storedFieldsToType.put(storedFieldNames[i], types[i]);
+        }
+        final String[] titles = new String[num];
+        final long[] weights = new long[num];
+        final Object[][] storedFieldValues = new Object[num][numStoredFields];
+        String suffix = generateRandomSuggestions(randomIntBetween(4, scaledRandomIntBetween(30, 100)));
+        for (int i = 0; i < titles.length; i++) {
+            boolean duplicate = rarely() && i != 0;
+            suffix = (duplicate) ? suffix : generateRandomSuggestions(randomIntBetween(4, scaledRandomIntBetween(30, 100)));
+            titles[i] = prefixStr + suffix;
+            weights[i] = between(0, 100); // assume the long val fits in an int too
+            storedFieldValues[i] = generateStoredFields(numStoredFields, types, titles[i], weights[i]);
+        }
 
         CompletionProvider completionProvider = new CompletionProvider(mapper);
-        completionProvider.indexCompletions(titles, titles, weights);
+        completionProvider.indexCompletions(titles, titles, weights, storedFieldNames, types, storedFieldValues);
 
         IndexReader reader = completionProvider.getReader();
         Tuple<XLookup, AtomicReader> lookupAtomicReaderTuple = completionProvider.getLookup(reader);
@@ -100,14 +146,75 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
 
         assertThat(lookup, instanceOf(XNRTSuggester.class));
         XNRTSuggester suggester = (XNRTSuggester) lookup;
-        final HashSet<String> strings = new HashSet<String>(1);
-        strings.add("areek");
-        List<XLookup.XLookupResult> lookupResults = suggester.lookup("ar", 3, atomicReader, strings);
+        final HashSet<String> strings = new HashSet<>();
+        for (int i = 0; i < numStoredFields; i++) {
+            if (randomBoolean()) {
+                strings.add(storedFieldNames[i]);
+            }
+        }
+        if (strings.size() == 0) {
+            strings.addAll(Arrays.asList(storedFieldNames));
+        }
+        int res = between(10, num);
+        final StringBuilder builder = new StringBuilder();
+        SuggestUtils.analyze(namedAnalzyer.tokenStream("foo", prefixStr), new SuggestUtils.TokenConsumer() {
+            @Override
+            public void nextToken() throws IOException {
+                if (builder.length() == 0) {
+                    builder.append(this.charTermAttr.toString());
+                }
+            }
+        });
+        String firstTerm = builder.toString();
+        String prefix = firstTerm.isEmpty() ? "" : firstTerm.substring(0, between(1, firstTerm.length()));
+        List<XLookup.XLookupResult> lookupResults = suggester.lookup(prefix, res, atomicReader, strings);
+        for(XLookup.XLookupResult lookupResult : lookupResults) {
+            String key = lookupResult.key.toString();
+            long weight = lookupResult.value;
+            // ensure all requested storedFields are returned
+            assertThat(strings.size(), equalTo(lookupResult.storedFields.size()));
+            for (XLookup.XLookupResult.XStoredField storedField : lookupResult.storedFields) {
+                assertTrue(strings.contains(storedField.name));
+                // ensure all values of storedFields are correct
+                Class clazz = storedFieldsToType.get(storedField.name);
+                assertNotNull(clazz);
+
+                if (clazz == String.class) {
+                    final List<String> stringValues = storedField.getStringValues();
+                    assertThat(stringValues.size(), greaterThan(0));
+                    for (String value : stringValues) {
+                        assertTrue(value.contains(key));
+                    }
+                } else if (clazz == BytesRef.class) {
+                    final List<BytesRef> binaryValues = storedField.getBinaryValues();
+                    assertThat(binaryValues.size(), greaterThan(0));
+                    for (BytesRef value : binaryValues) {
+                        assertTrue(value.utf8ToString().contains(key));
+                    }
+                } else if (clazz.getSuperclass() == Number.class) {
+                    final List<Number> numberValues = storedField.getNumericValues();
+                    assertThat(numberValues.size(), greaterThan(0));
+                    for (Number value : numberValues) {
+                        if (clazz == Integer.class) {
+                            assertThat((int) value, equalTo((int) weight));
+                        } else if (clazz == Float.class) {
+                            assertThat((float) value, equalTo((float) weight));
+                        } else if (clazz == Double.class) {
+                            assertThat((double) value, equalTo((double) weight));
+                        } else if (clazz == Long.class) {
+                            assertThat((long) value, equalTo(weight));
+                        }
+                    }
+                } else {
+                    assertFalse("StoredField has unsupported type=" + clazz.toString(), false);
+                }
+            }
+        }
     }
 
 
     @Test
-    public void testNRTDeletedDocFiltering() throws IOException {
+    public void testNRTDeletedDocFiltering() throws Exception {
         final boolean preserveSeparators = getRandom().nextBoolean();
         final boolean preservePositionIncrements = getRandom().nextBoolean();
         final boolean usePayloads = getRandom().nextBoolean();
@@ -266,8 +373,7 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
 
 
     @Test
-    public void testDuellCompletions() throws IOException, NoSuchFieldException, SecurityException, IllegalArgumentException,
-            IllegalAccessException {
+    public void testDuellCompletions() throws Exception {
         final boolean preserveSeparators = getRandom().nextBoolean();
         final boolean preservePositionIncrements = getRandom().nextBoolean();
         final boolean usePayloads = getRandom().nextBoolean();
@@ -422,6 +528,9 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
         RAMDirectory dir = new RAMDirectory();
         Map<String, List<Integer>> termsToDocID = new HashMap<>();
         Set<Integer> docIDSet = new HashSet<>();
+        final static int NUMERIC = 0;
+        final static int STRING = 1;
+        final static int BINARY = 2;
 
 
         public CompletionProvider(final CompletionFieldMapper mapper) throws IOException {
@@ -439,13 +548,55 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
             this.mapper = mapper;
         }
 
-        public void indexCompletions(String[] terms, String[] surfaces, long[] weights) throws IOException {
+        /**
+        public void indexCompletions(String[] terms, String[] surfaces, long[] weights, String[] storedFieldNames, Object[]... storedFieldValues) throws Exception {
+            assert (terms.length == surfaces.length) && (terms.length == weights.length);
+            assert storedFieldNames.length == storedFieldValues.length;
+            int[] types = new int[storedFieldNames.length];
+            for (int i = 0; i < storedFieldNames.length; i++) {
+                int type = -1;
+                Object[] fieldValues = storedFieldValues[i];
+                assert fieldValues.length == terms.length;
+                Class clazz = fieldValues[0].getClass();
+                if (clazz == Number.class) {
+                    type = NUMERIC;
+                } else if (clazz == String.class) {
+                    type = STRING;
+                } else if (clazz == BytesRef.class) {
+                    type = BINARY;
+                }
+                assert type != -1 : "types of storedFieldValues can be one of the following: Number, String, BytesRef (binary)";
+                types[i] = type;
+            }
+            indexCompletions(terms, surfaces, weights, storedFieldNames, types, storedFieldValues);
+        }*/
+
+        private Field makeField(String name, Object value, Class type) throws Exception {
+            if (type == String.class) {
+                return new StoredField(name, (String) value);
+            } else if (type == BytesRef.class) {
+                return new StoredField(name, (BytesRef) value);
+            } else if (type == Integer.class) {
+                return new StoredField(name, (int) value);
+            } else if (type == Float.class) {
+                return new StoredField(name, (float) value);
+            } else if (type == Double.class) {
+                return new StoredField(name, (double) value);
+            } else if (type == Long.class) {
+                return new StoredField(name, (long) value);
+            }
+            throw new Exception("Unsupported Type "+ type);
+        }
+
+        private void indexCompletions(String[] terms, String[] surfaces, long[] weights, String[] storedFieldNames, Class[] types, Object[]... storedFieldValues) throws Exception {
             writer = new IndexWriter(dir, indexWriterConfig);
             for (int i = 0; i < weights.length; i++) {
                 Document doc = new Document();
                 BytesRef payload = mapper.buildPayload(new BytesRef(surfaces[i]), weights[i], new BytesRef(Long.toString(weights[i])));
                 doc.add(mapper.getCompletionField(ContextMapping.EMPTY_CONTEXT, terms[i], payload));
-                doc.add(new StringField("areek", "areef", Field.Store.YES));
+                for (int j = 0; j < storedFieldNames.length; j++) {
+                    doc.add(makeField(storedFieldNames[j], storedFieldValues[i][j], types[j]));
+                }
                 if (randomBoolean()) {
                     writer.commit();
                 }
@@ -473,7 +624,10 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
             writer.commit();
 
             assertThat(docIDSet.size(), equalTo(weights.length));
+        }
 
+        public void indexCompletions(String[] terms, String[] surfaces, long[] weights) throws Exception {
+            indexCompletions(terms, surfaces, weights, new String[0], new Class[0]);
         }
 
         public void deleteDoc(IndexReader reader, String term) throws IOException {
