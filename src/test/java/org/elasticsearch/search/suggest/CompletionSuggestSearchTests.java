@@ -514,7 +514,7 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
         ensureGreen(INDEX);
 
         SuggestResponse afterReindexingResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionBuilder("suggs").field("suggest").text("f").size(10)
+                SuggestBuilders.completionSuggestion("suggs").field("suggest").text("f").size(10)
         ).execute().actionGet();
         assertSuggestions(afterReindexingResponse, "suggs", "Foo Fighters");
     }
@@ -551,7 +551,7 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
         assertThat(putMappingResponse.isAcknowledged(), is(true));
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionBuilder("suggs").field("suggest").text("f").size(10)
+                SuggestBuilders.completionSuggestion("suggs").field("suggest").text("f").size(10)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, "suggs");
 
@@ -559,7 +559,7 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
         ensureGreen(INDEX);
 
         SuggestResponse afterReindexingResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionBuilder("suggs").field("suggest").text("f").size(10)
+                SuggestBuilders.completionSuggestion("suggs").field("suggest").text("f").size(10)
         ).execute().actionGet();
         assertSuggestions(afterReindexingResponse, "suggs", "Foo Fighters");
     }
@@ -577,12 +577,12 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
         refresh();
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Nirv").size(10)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Nirv").size(10)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "Nirvana");
 
         suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Nirw").size(10)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Nirw").size(10)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "Nirvana");
     }
@@ -601,13 +601,13 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
 
         // edit distance 1
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Norw").size(10)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Norw").size(10)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo");
 
         // edit distance 2
         suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Norw").size(10).setFuzziness(Fuzziness.TWO)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Norw").size(10).setFuzziness(Fuzziness.TWO)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "Nirvana");
     }
@@ -625,12 +625,12 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
         refresh();
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Nriv").size(10).setFuzzyTranspositions(false).setFuzziness(Fuzziness.ONE)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Nriv").size(10).setFuzzyTranspositions(false).setFuzziness(Fuzziness.ONE)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo");
 
         suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Nriv").size(10).setFuzzyTranspositions(true).setFuzziness(Fuzziness.ONE)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Nriv").size(10).setFuzzyTranspositions(true).setFuzziness(Fuzziness.ONE)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "Nirvana");
     }
@@ -648,12 +648,12 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
         refresh();
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Nriva").size(10).setFuzzyMinLength(6)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Nriva").size(10).setFuzzyMinLength(6)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo");
 
         suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Nrivan").size(10).setFuzzyMinLength(6)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Nrivan").size(10).setFuzzyMinLength(6)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "Nirvana");
     }
@@ -671,12 +671,12 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
         refresh();
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Nirw").size(10).setFuzzyPrefixLength(4)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Nirw").size(10).setFuzzyPrefixLength(4)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo");
 
         suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("Nirvo").size(10).setFuzzyPrefixLength(4)
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("Nirvo").size(10).setFuzzyPrefixLength(4)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "Nirvana");
     }
@@ -695,7 +695,7 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
 
         // suggestion with a character, which needs unicode awareness
         CompletionSuggestionFuzzyBuilder completionSuggestionBuilder =
-                new CompletionSuggestionFuzzyBuilder("foo").field(FIELD).text("öööи").size(10).setUnicodeAware(true);
+                SuggestBuilders.fuzzyCompletionSuggestion("foo").field(FIELD).text("öööи").size(10).setUnicodeAware(true);
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(completionSuggestionBuilder).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "ööööö");
@@ -829,7 +829,7 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
     public void assertSuggestions(String suggestion, String... suggestions) {
         String suggestionName = RandomStrings.randomAsciiOfLength(new Random(), 10);
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionBuilder(suggestionName).field(FIELD).text(suggestion).size(10)
+                SuggestBuilders.completionSuggestion(suggestionName).field(FIELD).text(suggestion).size(10)
         ).execute().actionGet();
 
         assertSuggestions(suggestResponse, suggestionName, suggestions);
@@ -838,7 +838,7 @@ public class CompletionSuggestSearchTests extends ElasticsearchIntegrationTest {
     public void assertSuggestionsNotInOrder(String suggestString, String... suggestions) {
         String suggestionName = RandomStrings.randomAsciiOfLength(new Random(), 10);
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                new CompletionSuggestionBuilder(suggestionName).field(FIELD).text(suggestString).size(10)
+                SuggestBuilders.completionSuggestion(suggestionName).field(FIELD).text(suggestString).size(10)
         ).execute().actionGet();
 
         assertSuggestions(suggestResponse, false, suggestionName, suggestions);
