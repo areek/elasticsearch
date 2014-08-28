@@ -39,15 +39,16 @@ import java.util.*;
 /**
  * Currently A fork of {@link org.apache.lucene.search.suggest.analyzing.XAnalyzingSuggester}
  * with very limited NRT capabilities.
- * Only Supported NRT feature is deleted document filtering from suggestions.
+ * Supported features:
+ *  - filter out deleted documents (NRT)
+ *  - returning arbitrary stored fields as payload (NRT)
+ *  - optionally return duplicated output
  * NOTE: This is still largely a work in progress.
  *
  * TODO:
- *   - Support optional surface form deduplication
  *   - Flexible Scoring/Weighting:
  *     - allow factoring in external factors (lookup key, surface form) to weighting suggestions
  *     - support context using outputs
- *   - Support returning arbitrary StoredFields from documents of resulting suggestions
  *   - General Refactoring
  *   
  * @lucene.experimental
@@ -327,45 +328,25 @@ public class XNRTSuggester extends XLookup {
       return null;
   }
 
-  private boolean sameSurfaceForm(BytesRef key, BytesRef output2) {
-    if (hasPayloads) {
-      // output2 has at least PAYLOAD_SEP byte:
-      if (key.length >= output2.length) {
-        return false;
-      }
-      for(int i=0;i<key.length;i++) {
-        if (key.bytes[key.offset+i] != output2.bytes[output2.offset+i]) {
-          return false;
-        }
-      }
-      return output2.bytes[output2.offset + key.length] == payloadSep;
-    } else {
-      int docIDSepIndex = XPayLoadProcessor.getDocIDSepIndex(output2, false, payloadSep);
-      if (docIDSepIndex != -1) {
-        BytesRef spare = new BytesRef(output2.bytes, output2.offset, output2.length - 1 - docIDSepIndex);
-        return key.bytesEquals(spare);
-      }
-      return key.bytesEquals(output2);
-    }
-  }
-
-  @Override
-  public List<XLookupResult> lookup(final CharSequence key, final int num) {
-      return lookup(key, num, null, null);
-  }
-
-  @Override
-  public List<XLookupResult> lookup(final CharSequence key, final int num, final AtomicReader reader) {
-      return lookup(key, num, reader, null);
-  }
-
   private static double calculateLiveDocRatio(int numDocs, int maxDocs) {
-      return (numDocs > 0) ? ((double) numDocs / maxDocs) : -1;
+    return (numDocs > 0) ? ((double) numDocs / maxDocs) : -1;
   }
 
-  public List<XLookupResult> lookup(final CharSequence key, int num, final AtomicReader reader, Set<String> payloadFields) {
-    assert num > 0;
+  @Override
+  public List<XLookupResult> lookup(final XLookupOptions lookupOptions) {
+    final CharSequence key = lookupOptions.key;
+    final int num = lookupOptions.num;
+    final AtomicReader reader = lookupOptions.reader;
+    final Set<String> payloadFields = lookupOptions.payloadFields;
 
+      try {
+          PrintWriter pw = new PrintWriter("/tmp/out.dot");
+          Util.toDot(fst, pw, true, true);
+          pw.close();
+      } catch (IOException e) {
+          e.printStackTrace();
+      }
+    assert num > 0;
     if (fst == null) {
       return Collections.emptyList();
     }
@@ -469,8 +450,8 @@ public class XNRTSuggester extends XLookup {
         // maxSurfaceFormsPerAnalyzedForm:
         for(Result<Pair<Long,BytesRef>> completion : completions) {
           BytesRef output2 = completion.output.output2;
-          if (sameSurfaceForm(utf8Key, output2)) {
-            XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(output2, hasPayloads, payloadSep, spare);
+          XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(output2, hasPayloads, payloadSep, spare);
+          if (metaData.surfaceForm.bytesEquals(utf8Key)) {
             results.add(getLookupResult(spare, completion.output.output1, metaData.payload, getPayloadFields(metaData.docID, payloadFields, reader)));
             break;
           }
@@ -482,8 +463,8 @@ public class XNRTSuggester extends XLookup {
         }
       }
 
-      Util.TopNSearcher<Pair<Long,BytesRef>> searcher;
-      searcher = new Util.TopNSearcher<Pair<Long,BytesRef>>(fst,
+      XUtil.TopNSearcher<Pair<Long,BytesRef>> searcher;
+      searcher = new XUtil.TopNSearcher<Pair<Long,BytesRef>>(fst,
                                                             num - results.size(),
                                                             getMaxTopNSearcherQueueSize(num, liveDocsRatio),
                                                             weightComparator) {
@@ -501,12 +482,22 @@ public class XNRTSuggester extends XLookup {
           }
           // Dedup: when the input analyzes to a graph we
           // can get duplicate surface forms:
-          if (seen.contains(metaData.surfaceForm)) {
+          if (!lookupOptions.duplicateSurfaceForm && seen.contains(metaData.surfaceForm)) {
               return false;
           }
           seen.add(metaData.surfaceForm);
 
           if (!exactFirst) {
+              try {
+                  XLookupResult result = getLookupResult(spare, output.output1, metaData.payload, getPayloadFields(metaData.docID, payloadFields, reader));
+                  results.add(result);
+                  if (results.size() == num) {
+
+                  }
+              } catch (IOException e) {
+                  throw new RuntimeException(e);
+              }
+
             return true;
           } else {
             // In exactFirst mode, don't accept any paths
@@ -530,12 +521,12 @@ public class XNRTSuggester extends XLookup {
         searcher.addStartPaths(path.fstNode, path.output, true, path.input);
       }
 
-      TopResults<Pair<Long,BytesRef>> completions = searcher.search();
+      XUtil.TopResults<Pair<Long,BytesRef>> completions = searcher.search();
       // search admissibility is not guaranteed
       // see comment on getMaxTopNSearcherQueueSize
       //assert completions.isComplete;
 
-      for(Result<Pair<Long,BytesRef>> completion : completions) {
+      /*for(Result<Pair<Long,BytesRef>> completion : completions) {
         XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(completion.output.output2, hasPayloads, payloadSep, spare);
 
           XLookupResult result = getLookupResult(spare, completion.output.output1, metaData.payload, getPayloadFields(metaData.docID, payloadFields, reader));
@@ -551,7 +542,7 @@ public class XNRTSuggester extends XLookup {
           // produce one extra path
           break;
         }
-      }
+      }*/
 
       return results;
     } catch (IOException bogus) {

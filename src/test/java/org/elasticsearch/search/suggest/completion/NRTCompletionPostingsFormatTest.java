@@ -19,24 +19,18 @@
 
 package org.elasticsearch.search.suggest.completion;
 
-import com.google.common.collect.Lists;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.codecs.*;
 import org.apache.lucene.codecs.lucene49.Lucene49Codec;
-import org.apache.lucene.codecs.perfield.PerFieldPostingsFormat;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
-import org.apache.lucene.index.FieldInfo.DocValuesType;
-import org.apache.lucene.index.FieldInfo.IndexOptions;
 import org.apache.lucene.search.suggest.InputIterator;
-import org.apache.lucene.search.suggest.Lookup;
 import org.apache.lucene.search.suggest.Lookup.LookupResult;
 import org.apache.lucene.search.suggest.analyzing.AnalyzingSuggester;
 import org.apache.lucene.search.suggest.analyzing.XAnalyzingSuggester;
 import org.apache.lucene.search.suggest.analyzing.XLookup;
 import org.apache.lucene.search.suggest.analyzing.XNRTSuggester;
 import org.apache.lucene.store.*;
-import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.LineFileDocs;
 import org.elasticsearch.common.collect.Tuple;
@@ -301,6 +295,102 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
     }
 
     @Test
+    public void testDuplicateOutput() throws Exception {
+        final boolean preserveSeparators = getRandom().nextBoolean();
+        final boolean preservePositionIncrements = getRandom().nextBoolean();
+        final boolean usePayloads = getRandom().nextBoolean();
+        PostingsFormatProvider provider = new PreBuiltPostingsFormatProvider(new Elasticsearch090PostingsFormat());
+        NamedAnalyzer namedAnalzyer = new NamedAnalyzer("foo", new StandardAnalyzer(TEST_VERSION_CURRENT));
+        final NRTCompletionFieldMapper mapper = new NRTCompletionFieldMapper(new Names("foo"), namedAnalzyer, namedAnalzyer, provider, null, usePayloads,
+                preserveSeparators, preservePositionIncrements, Integer.MAX_VALUE, AbstractFieldMapper.MultiFields.empty(), null, ContextMapping.EMPTY_MAPPING);
+
+        String prefixStr = generateRandomSuggestions(randomIntBetween(4, 6));
+        int num = scaledRandomIntBetween(10, 30);
+        final String[] titles = new String[num];
+        final long[] weights = new long[num];
+        final String suffix = generateRandomSuggestions(randomIntBetween(4, scaledRandomIntBetween(30, 100)));
+        long topScore = -1l;
+        for (int i = 0; i < titles.length; i++) {
+            titles[i] = prefixStr + suffix;
+            weights[i] = between(0, 100);
+            if (weights[i] > topScore) {
+                topScore = weights[i];
+            }
+        }
+        CompletionProvider completionProvider = new CompletionProvider(mapper);
+        completionProvider.indexCompletions(titles, titles, weights);
+
+
+        final StringBuilder builder = new StringBuilder();
+        SuggestUtils.analyze(namedAnalzyer.tokenStream("foo", prefixStr), new SuggestUtils.TokenConsumer() {
+            @Override
+            public void nextToken() throws IOException {
+                if (builder.length() == 0) {
+                    builder.append(this.charTermAttr.toString());
+                }
+            }
+        });
+        String firstTerm = builder.toString();
+        String prefix = firstTerm.isEmpty() ? "" : firstTerm.substring(0, between(1, firstTerm.length()));
+
+        int res = between(2, num);
+        IndexReader reader = completionProvider.getReader();
+        final Tuple<XLookup, AtomicReader> lookupAndReader = completionProvider.getLookup(reader);
+        XLookup lookup = lookupAndReader.v1();
+        AtomicReader atomicReader = lookupAndReader.v2();
+        List<XLookup.XLookupResult> defaultLookupResults = lookup.lookup(new XLookup.XLookupOptions(prefix, res, atomicReader));
+
+        // sanity check (default should not duplicate output form)
+        assertThat(defaultLookupResults.size(), equalTo(1));
+
+        List<XLookup.XLookupResult> duplicateOutputLookupResults = lookup.lookup(new XLookup.XLookupOptions(prefix, res, atomicReader, true));
+        reader.close();
+
+        // should duplicate output form (size == res)
+        assertThat(duplicateOutputLookupResults.size(), equalTo(res));
+
+        for (XLookup.XLookupResult result : duplicateOutputLookupResults) {
+            // weight should be highest to lowest
+            assertThat(result.value, lessThanOrEqualTo(topScore));
+            topScore = result.value;
+            String key = result.key.toString();
+            String defaultKey = defaultLookupResults.get(0).key.toString();
+            // should have the same key as default
+            assertThat(key, equalTo(defaultKey));
+        }
+        completionProvider.close();
+    }
+    @Test
+    public void testDebug() throws Exception {
+        final boolean preserveSeparators = getRandom().nextBoolean();
+        final boolean preservePositionIncrements = getRandom().nextBoolean();
+        final boolean usePayloads = getRandom().nextBoolean();
+        PostingsFormatProvider provider = new PreBuiltPostingsFormatProvider(new Elasticsearch090PostingsFormat());
+        NamedAnalyzer namedAnalzyer = new NamedAnalyzer("foo", new StandardAnalyzer(TEST_VERSION_CURRENT));
+        final NRTCompletionFieldMapper mapper = new NRTCompletionFieldMapper(new Names("foo"), namedAnalzyer, namedAnalzyer, provider, null, usePayloads,
+                preserveSeparators, preservePositionIncrements, Integer.MAX_VALUE, AbstractFieldMapper.MultiFields.empty(), null, ContextMapping.EMPTY_MAPPING);
+
+        int num = 4;
+        final String[] titles = {"areek", "armel", "ardef", "arik", "areuj", "blah"};
+        final long[] weights = {5, 4, 3, 2, 5, 10};
+
+        CompletionProvider completionProvider = new CompletionProvider(mapper);
+        completionProvider.indexCompletions(titles, titles, weights);
+
+        IndexReader reader = completionProvider.getReader();
+        final Tuple<XLookup, AtomicReader> lookupAndReader = completionProvider.getLookup(reader);
+        XLookup lookup = lookupAndReader.v1();
+        AtomicReader atomicReader = lookupAndReader.v2();
+        assertTrue(lookup instanceof XNRTSuggester);
+        XNRTSuggester suggester = (XNRTSuggester) lookup;
+        List<XLookup.XLookupResult> lookupResults = suggester.lookup("ar", num, atomicReader);
+        System.out.println(lookupResults.size());
+        reader.close();
+
+        completionProvider.close();
+    }
+
+    @Test
     public void testDedupSurfaceForms() throws Exception {
         final boolean preserveSeparators = getRandom().nextBoolean();
         final boolean preservePositionIncrements = getRandom().nextBoolean();
@@ -528,10 +618,6 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
         RAMDirectory dir = new RAMDirectory();
         Map<String, List<Integer>> termsToDocID = new HashMap<>();
         Set<Integer> docIDSet = new HashSet<>();
-        final static int NUMERIC = 0;
-        final static int STRING = 1;
-        final static int BINARY = 2;
-
 
         public CompletionProvider(final CompletionFieldMapper mapper) throws IOException {
             Codec filterCodec = new Lucene49Codec() {
@@ -547,29 +633,6 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
             indexWriterConfig.setCodec(filterCodec);
             this.mapper = mapper;
         }
-
-        /**
-        public void indexCompletions(String[] terms, String[] surfaces, long[] weights, String[] storedFieldNames, Object[]... storedFieldValues) throws Exception {
-            assert (terms.length == surfaces.length) && (terms.length == weights.length);
-            assert storedFieldNames.length == storedFieldValues.length;
-            int[] types = new int[storedFieldNames.length];
-            for (int i = 0; i < storedFieldNames.length; i++) {
-                int type = -1;
-                Object[] fieldValues = storedFieldValues[i];
-                assert fieldValues.length == terms.length;
-                Class clazz = fieldValues[0].getClass();
-                if (clazz == Number.class) {
-                    type = NUMERIC;
-                } else if (clazz == String.class) {
-                    type = STRING;
-                } else if (clazz == BytesRef.class) {
-                    type = BINARY;
-                }
-                assert type != -1 : "types of storedFieldValues can be one of the following: Number, String, BytesRef (binary)";
-                types[i] = type;
-            }
-            indexCompletions(terms, surfaces, weights, storedFieldNames, types, storedFieldValues);
-        }*/
 
         private Field makeField(String name, Object value, Class type) throws Exception {
             if (type == String.class) {
