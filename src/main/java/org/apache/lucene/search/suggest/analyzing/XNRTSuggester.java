@@ -491,9 +491,6 @@ public class XNRTSuggester extends XLookup {
               try {
                   XLookupResult result = getLookupResult(spare, output.output1, metaData.payload, getPayloadFields(metaData.docID, payloadFields, reader));
                   results.add(result);
-                  if (results.size() == num) {
-
-                  }
               } catch (IOException e) {
                   throw new RuntimeException(e);
               }
