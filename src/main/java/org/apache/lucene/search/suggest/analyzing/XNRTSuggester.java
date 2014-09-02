@@ -75,22 +75,10 @@ public class XNRTSuggester extends XLookup {
    */
   private final Analyzer queryAnalyzer;
   
-  /** 
-   * True if exact match suggestions should always be returned first.
-   */
-  private final boolean exactFirst;
-  
-  /** 
+  /**
    * True if separator between tokens should be preserved.
    */
   private final boolean preserveSep;
-
-  /** Include this flag in the options parameter to {@link
-   *  #XAnalyzingSuggester(Analyzer,Analyzer,int,int,int,boolean,FST,boolean,int,int,int,int,int)} to always
-   *  return the exact match first, regardless of score.  This
-   *  has no performance impact but could result in
-   *  low-quality suggestions. */
-  public static final int EXACT_FIRST = 1;
 
   /** Include this flag in the options parameter to {@link
    *  #XAnalyzingSuggester(Analyzer,Analyzer,int,int,int,boolean,FST,boolean,int,int,int,int,int)} to preserve
@@ -137,20 +125,18 @@ public class XNRTSuggester extends XLookup {
 
     /**
    * Calls {@link #XAnalyzingSuggester(Analyzer,Analyzer,int,int,int,boolean,FST,boolean,int,int,int,int,int)
-   * AnalyzingSuggester(analyzer, analyzer, EXACT_FIRST |
-   * PRESERVE_SEP, 256, -1)}
+   * AnalyzingSuggester(analyzer, analyzer, PRESERVE_SEP, 256, -1)}
    */
   public XNRTSuggester(Analyzer analyzer) {
-    this(analyzer, null, analyzer, EXACT_FIRST | PRESERVE_SEP, 256, -1, true, null, false, 0, SEP_LABEL, PAYLOAD_SEP, END_BYTE, HOLE_CHARACTER);
+    this(analyzer, null, analyzer, PRESERVE_SEP, 256, -1, true, null, false, 0, SEP_LABEL, PAYLOAD_SEP, END_BYTE, HOLE_CHARACTER);
   }
 
   /**
    * Calls {@link #XAnalyzingSuggester(Analyzer,Analyzer,int,int,int,boolean,FST,boolean,int,int,int,int,int)
-   * AnalyzingSuggester(indexAnalyzer, queryAnalyzer, EXACT_FIRST |
-   * PRESERVE_SEP, 256, -1)}
+   * AnalyzingSuggester(indexAnalyzer, queryAnalyzer, PRESERVE_SEP, 256, -1)}
    */
   public XNRTSuggester(Analyzer indexAnalyzer, Analyzer queryAnalyzer) {
-    this(indexAnalyzer, null, queryAnalyzer, EXACT_FIRST | PRESERVE_SEP, 256, -1, true, null, false, 0, SEP_LABEL, PAYLOAD_SEP, END_BYTE, HOLE_CHARACTER);
+    this(indexAnalyzer, null, queryAnalyzer, PRESERVE_SEP, 256, -1, true, null, false, 0, SEP_LABEL, PAYLOAD_SEP, END_BYTE, HOLE_CHARACTER);
   }
 
   /**
@@ -160,7 +146,7 @@ public class XNRTSuggester extends XLookup {
    *   analyzing suggestions while building the index.
    * @param queryAnalyzer Analyzer that will be used for
    *   analyzing query text during lookup
-   * @param options see {@link #EXACT_FIRST}, {@link #PRESERVE_SEP}
+   * @param options see {@link #PRESERVE_SEP}
    * @param maxSurfaceFormsPerAnalyzedForm Maximum number of
    *   surface forms to keep for a single analyzed form.
    *   When there are too many surface forms we discard the
@@ -177,10 +163,10 @@ public class XNRTSuggester extends XLookup {
     this.queryAnalyzer = queryAnalyzer;
     this.fst = fst;
     this.hasPayloads = hasPayloads;
-    if ((options & ~(EXACT_FIRST | PRESERVE_SEP)) != 0) {
+    //TODO: simplify this as we dont have exact_first support
+    if ((options & ~(PRESERVE_SEP)) != 0) {
       throw new IllegalArgumentException("options should only contain EXACT_FIRST and PRESERVE_SEP; got " + options);
     }
-    this.exactFirst = (options & EXACT_FIRST) != 0;
     this.preserveSep = (options & PRESERVE_SEP) != 0;
 
     // FLORIAN EDIT: I added <code>queryPrefix</code> for context dependent suggestions
