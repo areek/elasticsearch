@@ -338,7 +338,7 @@ public class XNRTSuggester extends XLookup {
     final int num = lookupOptions.num;
     final AtomicReader reader = lookupOptions.reader;
     final Set<String> payloadFields = lookupOptions.payloadFields;
-
+    /* DEBUG
       try {
           PrintWriter pw = new PrintWriter("/tmp/out.dot");
           Util.toDot(fst, pw, true, true);
@@ -346,6 +346,7 @@ public class XNRTSuggester extends XLookup {
       } catch (IOException e) {
           e.printStackTrace();
       }
+      */
     assert num > 0;
     if (fst == null) {
       return Collections.emptyList();
@@ -370,102 +371,24 @@ public class XNRTSuggester extends XLookup {
         throw new IllegalArgumentException("lookup key cannot contain unit separator character U+001F; this character is reserved");
       }
     }
-    final BytesRef utf8Key = new BytesRef(key);
     try {
 
       Automaton lookupAutomaton = toLookupAutomaton(key);
 
-      final CharsRef spare = new CharsRef();
-
-      //System.out.println("  now intersect exactFirst=" + exactFirst);
-    
       // Intersect automaton w/ suggest wFST and get all
       // prefix starting nodes & their outputs:
       //final PathIntersector intersector = getPathIntersector(lookupAutomaton, fst);
 
       //System.out.println("  prefixPaths: " + prefixPaths.size());
 
-      BytesReader bytesReader = fst.getBytesReader();
-
-      FST.Arc<Pair<Long,BytesRef>> scratchArc = new FST.Arc<>();
-
       final List<XLookupResult> results = new ArrayList<>();
 
       List<FSTUtil.Path<Pair<Long,BytesRef>>> prefixPaths = FSTUtil.intersectPrefixPaths(convertAutomaton(lookupAutomaton), fst);
 
-      if (exactFirst) {
-
-        int count = 0;
-        for (FSTUtil.Path<Pair<Long,BytesRef>> path : prefixPaths) {
-          if (fst.findTargetArc(endByte, path.fstNode, scratchArc, bytesReader) != null) {
-            // This node has END_BYTE arc leaving, meaning it's an
-            // "exact" match:
-            count++;
-          }
-        }
-
-        // Searcher just to find the single exact only
-        // match, if present:
-        Util.TopNSearcher<Pair<Long,BytesRef>> searcher;
-        searcher = new Util.TopNSearcher<Pair<Long, BytesRef>>(fst, count * maxSurfaceFormsPerAnalyzedForm, getMaxTopNSearcherQueueSize(count, liveDocsRatio), weightComparator) {
-
-          @Override
-          protected boolean acceptResult(IntsRef input, Pair<Long,BytesRef> output) {
-            XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(output.output2, hasPayloads, payloadSep, spare);
-            if (liveDocs != null && metaData.hasDocID()) {
-              if (!liveDocs.get(metaData.docID)) {
-                  return false;
-              }
-            }
-            return true;
-          }
-        };
-
-        // NOTE: we could almost get away with only using
-        // the first start node.  The only catch is if
-        // maxSurfaceFormsPerAnalyzedForm had kicked in and
-        // pruned our exact match from one of these nodes
-        // ...:
-        for (FSTUtil.Path<Pair<Long,BytesRef>> path : prefixPaths) {
-          if (fst.findTargetArc(endByte, path.fstNode, scratchArc, bytesReader) != null) {
-            // This node has END_BYTE arc leaving, meaning it's an
-            // "exact" match:
-            searcher.addStartPaths(scratchArc, fst.outputs.add(path.output, scratchArc.output), false, path.input);
-          }
-        }
-
-        Util.TopResults<Pair<Long,BytesRef>> completions = searcher.search();
-
-        // NOTE: this is rather inefficient: we enumerate
-        // every matching "exactly the same analyzed form"
-        // path, and then do linear scan to see if one of
-        // these exactly matches the input.  It should be
-        // possible (though hairy) to do something similar
-        // to getByOutput, since the surface form is encoded
-        // into the FST output, so we more efficiently hone
-        // in on the exact surface-form match.  Still, I
-        // suspect very little time is spent in this linear
-        // seach: it's bounded by how many prefix start
-        // nodes we have and the
-        // maxSurfaceFormsPerAnalyzedForm:
-        for(Result<Pair<Long,BytesRef>> completion : completions) {
-          BytesRef output2 = completion.output.output2;
-          XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(output2, hasPayloads, payloadSep, spare);
-          if (metaData.surfaceForm.bytesEquals(utf8Key)) {
-            results.add(getLookupResult(spare, completion.output.output1, metaData.payload, getPayloadFields(metaData.docID, payloadFields, reader)));
-            break;
-          }
-        }
-
-        if (results.size() == num) {
-          // That was quick:
-          return results;
-        }
-      }
 
       XUtil.TopNSearcher<Pair<Long,BytesRef>> searcher;
       searcher = new XUtil.TopNSearcher<Pair<Long,BytesRef>>(fst,
-                                                            num - results.size(),
+                                                            num,
                                                             getMaxTopNSearcherQueueSize(num, liveDocsRatio),
                                                             weightComparator) {
         private final Set<BytesRef> seen = new HashSet<>();
@@ -487,28 +410,14 @@ public class XNRTSuggester extends XLookup {
           }
           seen.add(metaData.surfaceForm);
 
-          if (!exactFirst) {
-              try {
-                  XLookupResult result = getLookupResult(spare, output.output1, metaData.payload, getPayloadFields(metaData.docID, payloadFields, reader));
-                  results.add(result);
-              } catch (IOException e) {
-                  throw new RuntimeException(e);
-              }
-
-            return true;
-          } else {
-            // In exactFirst mode, don't accept any paths
-            // matching the surface form since that will
-            // create duplicate results:
-            if (metaData.surfaceForm.bytesEquals(utf8Key)) {
-              // We found exact match, which means we should
-              // have already found it in the first search:
-              assert results.size() == 1;
-              return false;
-            } else {
-              return true;
-            }
+          try {
+              XLookupResult result = getLookupResult(spare, output.output1, metaData.payload, getPayloadFields(metaData.docID, payloadFields, reader));
+              results.add(result);
+          } catch (IOException e) {
+              throw new RuntimeException(e);
           }
+
+          return true;
         }
       };
 
@@ -518,29 +427,12 @@ public class XNRTSuggester extends XLookup {
         searcher.addStartPaths(path.fstNode, path.output, true, path.input);
       }
 
-      XUtil.TopResults<Pair<Long,BytesRef>> completions = searcher.search();
+      // TODO: for fuzzy case would be nice to return
+
+      boolean isComplete = searcher.search();
       // search admissibility is not guaranteed
       // see comment on getMaxTopNSearcherQueueSize
-      //assert completions.isComplete;
-
-      /*for(Result<Pair<Long,BytesRef>> completion : completions) {
-        XPayLoadProcessor.PayloadMetaData metaData = XPayLoadProcessor.parse(completion.output.output2, hasPayloads, payloadSep, spare);
-
-          XLookupResult result = getLookupResult(spare, completion.output.output1, metaData.payload, getPayloadFields(metaData.docID, payloadFields, reader));
-
-        // TODO: for fuzzy case would be nice to return
-        // how many edits were required
-
-        //System.out.println("    result=" + result);
-        results.add(result);
-
-        if (results.size() == num) {
-          // In the exactFirst=true case the search may
-          // produce one extra path
-          break;
-        }
-      }*/
-
+      //assert isComplete;
       return results;
     } catch (IOException bogus) {
       throw new RuntimeException(bogus);

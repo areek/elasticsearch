@@ -112,6 +112,7 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
             types[i] = randomFrom(String.class, Integer.class, Float.class, Double.class, Long.class, BytesRef.class);
             String tempName = randomUnicodeOfCodepointLengthBetween(4, 10);
             while (storedFieldsToType.containsKey(tempName)) {
+                // NOTE: assuming there is no restriction in field names in lucene
                 tempName = randomUnicodeOfCodepointLengthBetween(4, 10);
             }
             storedFieldNames[i] = tempName;
@@ -177,17 +178,20 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
                     final List<String> stringValues = storedField.getStringValues();
                     assertThat(stringValues.size(), greaterThan(0));
                     for (String value : stringValues) {
+                        // key should be a substring of the field value
                         assertTrue(value.contains(key));
                     }
                 } else if (clazz == BytesRef.class) {
                     final List<BytesRef> binaryValues = storedField.getBinaryValues();
                     assertThat(binaryValues.size(), greaterThan(0));
                     for (BytesRef value : binaryValues) {
+                        // key should be a substring of the field value
                         assertTrue(value.utf8ToString().contains(key));
                     }
                 } else if (clazz.getSuperclass() == Number.class) {
                     final List<Number> numberValues = storedField.getNumericValues();
                     assertThat(numberValues.size(), greaterThan(0));
+                    // numeric field value should be the weight of the suggestion (with proper casting)
                     for (Number value : numberValues) {
                         if (clazz == Integer.class) {
                             assertThat((int) value, equalTo((int) weight));
@@ -200,7 +204,7 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
                         }
                     }
                 } else {
-                    assertFalse("StoredField has unsupported type=" + clazz.toString(), false);
+                    assertFalse("StoredField has unsupported type=" + clazz.getSimpleName(), false);
                 }
             }
         }
@@ -479,7 +483,8 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
             Document nextDoc = docs.nextDoc();
             IndexableField field = nextDoc.getField("title");
             titles[i] = field.stringValue();
-            weights[i] = between(0, 100);
+            // there can be cases where the suggestions might differ, if two suggested terms have the same weight
+            weights[i] = i;//between(0, 100);
 
         }
         docs.close();
