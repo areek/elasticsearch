@@ -101,9 +101,7 @@ public class XUtil {
             // copy over the current input to the new input
             // and add the arc.label to the end
             IntsRef newInput = new IntsRef(path.input.length+1);
-            if (DEBUG) {
-                System.arraycopy(path.input.ints, 0, newInput.ints, 0, path.input.length);
-            }
+            System.arraycopy(path.input.ints, 0, newInput.ints, 0, path.input.length);
             newInput.ints[path.input.length] = path.arc.label;
             newInput.length = path.input.length+1;
             final Util.FSTPath<T> newPath = new Util.FSTPath<>(cost, path.arc, newInput);
@@ -154,7 +152,6 @@ public class XUtil {
          public boolean search() throws IOException {
 
             int resultCount = 0;
-            //final List<Util.Result<T>> results = new ArrayList<>();
 
             if (DEBUG) {
                 System.out.println("search topN=" + topN);

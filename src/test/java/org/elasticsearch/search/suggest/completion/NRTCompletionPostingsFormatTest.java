@@ -375,8 +375,8 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
                 preserveSeparators, preservePositionIncrements, Integer.MAX_VALUE, AbstractFieldMapper.MultiFields.empty(), null, ContextMapping.EMPTY_MAPPING);
 
         int num = 4;
-        final String[] titles = {"areek", "armel", "ardef", "arik", "areuj", "blah"};
-        final long[] weights = {5, 4, 3, 2, 5, 10};
+        final String[] titles = {"areek"};//, "armel", "ardef", "arik", "areuj", "blah"};
+        final long[] weights = {5};//, 4, 3, 2, 5, 10};
 
         CompletionProvider completionProvider = new CompletionProvider(mapper);
         completionProvider.indexCompletions(titles, titles, weights);
@@ -387,7 +387,7 @@ public class NRTCompletionPostingsFormatTest extends ElasticsearchTestCase {
         AtomicReader atomicReader = lookupAndReader.v2();
         assertTrue(lookup instanceof XNRTSuggester);
         XNRTSuggester suggester = (XNRTSuggester) lookup;
-        List<XLookup.XLookupResult> lookupResults = suggester.lookup("ar", num, atomicReader);
+        List<XLookup.XLookupResult> lookupResults = suggester.lookup("areek", num, atomicReader);
         System.out.println(lookupResults.size());
         reader.close();
 
