@@ -76,6 +76,7 @@ import org.elasticsearch.plugins.PluginsService;
 import org.elasticsearch.search.SearchService;
 import org.elasticsearch.test.cache.recycler.MockBigArraysModule;
 import org.elasticsearch.test.cache.recycler.MockPageCacheRecyclerModule;
+import org.elasticsearch.test.disruption.ServiceDisruptionScheme;
 import org.elasticsearch.test.engine.MockEngineModule;
 import org.elasticsearch.test.store.MockFSIndexStoreModule;
 import org.elasticsearch.test.transport.AssertingLocalTransport;
@@ -296,6 +297,10 @@ public final class InternalTestCluster extends TestCluster {
         return clusterName;
     }
 
+    public String[] getNodeNames() {
+        return nodes.keySet().toArray(Strings.EMPTY_ARRAY);
+    }
+
     private static boolean isLocalTransportConfigured() {
         if ("local".equals(System.getProperty("es.node.mode", "network"))) {
             return true;
@@ -493,6 +498,7 @@ public final class InternalTestCluster extends TestCluster {
         while (limit.hasNext()) {
             NodeAndClient next = limit.next();
             nodesToRemove.add(next);
+            removeDistruptionSchemeFromNode(next);
             next.close();
         }
         for (NodeAndClient toRemove : nodesToRemove) {
@@ -667,6 +673,10 @@ public final class InternalTestCluster extends TestCluster {
     @Override
     public void close() {
         if (this.open.compareAndSet(true, false)) {
+            if (activeDisruptionScheme != null) {
+                activeDisruptionScheme.testClusterClosed();
+                activeDisruptionScheme = null;
+            }
             IOUtils.closeWhileHandlingException(nodes.values());
             nodes.clear();
             executor.shutdownNow();
@@ -831,6 +841,7 @@ public final class InternalTestCluster extends TestCluster {
     }
 
     private synchronized void reset(boolean wipeData) throws IOException {
+        clearDisruptionScheme();
         randomlyResetClients();
         if (wipeData) {
             wipeDataDirectories();
@@ -1030,6 +1041,7 @@ public final class InternalTestCluster extends TestCluster {
         NodeAndClient nodeAndClient = getRandomNodeAndClient(new DataNodePredicate());
         if (nodeAndClient != null) {
             logger.info("Closing random node [{}] ", nodeAndClient.name);
+            removeDistruptionSchemeFromNode(nodeAndClient);
             nodes.remove(nodeAndClient.name);
             nodeAndClient.close();
         }
@@ -1049,6 +1061,7 @@ public final class InternalTestCluster extends TestCluster {
         });
         if (nodeAndClient != null) {
             logger.info("Closing filtered random node [{}] ", nodeAndClient.name);
+            removeDistruptionSchemeFromNode(nodeAndClient);
             nodes.remove(nodeAndClient.name);
             nodeAndClient.close();
         }
@@ -1063,6 +1076,7 @@ public final class InternalTestCluster extends TestCluster {
         String masterNodeName = getMasterName();
         assert nodes.containsKey(masterNodeName);
         logger.info("Closing master node [{}] ", masterNodeName);
+        removeDistruptionSchemeFromNode(nodes.get(masterNodeName));
         NodeAndClient remove = nodes.remove(masterNodeName);
         remove.close();
     }
@@ -1074,6 +1088,7 @@ public final class InternalTestCluster extends TestCluster {
         NodeAndClient nodeAndClient = getRandomNodeAndClient(Predicates.not(new MasterNodePredicate(getMasterName())));
         if (nodeAndClient != null) {
             logger.info("Closing random non master node [{}] current master [{}] ", nodeAndClient.name, getMasterName());
+            removeDistruptionSchemeFromNode(nodeAndClient);
             nodes.remove(nodeAndClient.name);
             nodeAndClient.close();
         }
@@ -1127,6 +1142,9 @@ public final class InternalTestCluster extends TestCluster {
                 if (!callback.doRestart(nodeAndClient.name)) {
                     logger.info("Closing node [{}] during restart", nodeAndClient.name);
                     toRemove.add(nodeAndClient);
+                    if (activeDisruptionScheme != null) {
+                        activeDisruptionScheme.removeFromNode(nodeAndClient.name, this);
+                    }
                     nodeAndClient.close();
                 }
             }
@@ -1141,18 +1159,33 @@ public final class InternalTestCluster extends TestCluster {
             for (NodeAndClient nodeAndClient : nodes.values()) {
                 callback.doAfterNodes(numNodesRestarted++, nodeAndClient.nodeClient());
                 logger.info("Restarting node [{}] ", nodeAndClient.name);
+                if (activeDisruptionScheme != null) {
+                    activeDisruptionScheme.removeFromNode(nodeAndClient.name, this);
+                }
                 nodeAndClient.restart(callback);
+                if (activeDisruptionScheme != null) {
+                    activeDisruptionScheme.applyToNode(nodeAndClient.name, this);
+                }
             }
         } else {
             int numNodesRestarted = 0;
             for (NodeAndClient nodeAndClient : nodes.values()) {
                 callback.doAfterNodes(numNodesRestarted++, nodeAndClient.nodeClient());
                 logger.info("Stopping node [{}] ", nodeAndClient.name);
+                if (activeDisruptionScheme != null) {
+                    activeDisruptionScheme.removeFromNode(nodeAndClient.name, this);
+                }
                 nodeAndClient.node.close();
             }
             for (NodeAndClient nodeAndClient : nodes.values()) {
                 logger.info("Starting node [{}] ", nodeAndClient.name);
+                if (activeDisruptionScheme != null) {
+                    activeDisruptionScheme.removeFromNode(nodeAndClient.name, this);
+                }
                 nodeAndClient.restart(callback);
+                if (activeDisruptionScheme != null) {
+                    activeDisruptionScheme.applyToNode(nodeAndClient.name, this);
+                }
             }
         }
     }
@@ -1350,6 +1383,7 @@ public final class InternalTestCluster extends TestCluster {
             dataDirToClean.addAll(Arrays.asList(nodeEnv.nodeDataLocations()));
         }
         nodes.put(nodeAndClient.name, nodeAndClient);
+        applyDisruptionSchemeToNode(nodeAndClient);
     }
 
     public void closeNonSharedNodes(boolean wipeData) throws IOException {
@@ -1369,6 +1403,33 @@ public final class InternalTestCluster extends TestCluster {
     @Override
     public boolean hasFilterCache() {
         return hasFilterCache;
+    }
+
+    public void setDisruptionScheme(ServiceDisruptionScheme scheme) {
+        clearDisruptionScheme();
+        scheme.applyToCluster(this);
+        activeDisruptionScheme = scheme;
+    }
+
+    public void clearDisruptionScheme() {
+        if (activeDisruptionScheme != null) {
+            activeDisruptionScheme.removeFromCluster(this);
+        }
+        activeDisruptionScheme = null;
+    }
+
+    private void applyDisruptionSchemeToNode(NodeAndClient nodeAndClient) {
+        if (activeDisruptionScheme != null) {
+            assert nodes.containsKey(nodeAndClient.name);
+            activeDisruptionScheme.applyToNode(nodeAndClient.name, this);
+        }
+    }
+
+    private void removeDistruptionSchemeFromNode(NodeAndClient nodeAndClient) {
+        if (activeDisruptionScheme != null) {
+            assert nodes.containsKey(nodeAndClient.name);
+            activeDisruptionScheme.removeFromNode(nodeAndClient.name, this);
+        }
     }
 
     private synchronized Collection<NodeAndClient> dataNodeAndClients() {
