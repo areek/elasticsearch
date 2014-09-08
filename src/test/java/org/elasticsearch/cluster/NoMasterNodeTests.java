@@ -137,7 +137,7 @@ public class NoMasterNodeTests extends ElasticsearchIntegrationTest {
                 ClusterBlockException.class, RestStatus.SERVICE_UNAVAILABLE
         );
 
-        checkWriteAction(autoCreateIndex, timeout,
+        checkWriteAction(false, timeout,
                 client().prepareUpdate("test", "type1", "1").setScript("test script", ScriptService.ScriptType.INLINE).setTimeout(timeout));
 
 
@@ -145,7 +145,7 @@ public class NoMasterNodeTests extends ElasticsearchIntegrationTest {
                 client().prepareUpdate("no_index", "type1", "1").setScript("test script", ScriptService.ScriptType.INLINE).setTimeout(timeout));
 
 
-        checkWriteAction(autoCreateIndex, timeout,
+        checkWriteAction(false, timeout,
                 client().prepareIndex("test", "type1", "1").setSource(XContentFactory.jsonBuilder().startObject().endObject()).setTimeout(timeout));
 
         checkWriteAction(autoCreateIndex, timeout,
@@ -154,9 +154,8 @@ public class NoMasterNodeTests extends ElasticsearchIntegrationTest {
         BulkRequestBuilder bulkRequestBuilder = client().prepareBulk();
         bulkRequestBuilder.add(client().prepareIndex("test", "type1", "1").setSource(XContentFactory.jsonBuilder().startObject().endObject()));
         bulkRequestBuilder.add(client().prepareIndex("test", "type1", "2").setSource(XContentFactory.jsonBuilder().startObject().endObject()));
-        // today, we clear the metadata on when there is no master, so it will go through the auto create logic and
-        // add it... (if autoCreate is set to true)
-        checkBulkAction(autoCreateIndex, bulkRequestBuilder);
+        bulkRequestBuilder.setTimeout(timeout);
+        checkBulkAction(false, timeout, bulkRequestBuilder);
 
         bulkRequestBuilder = client().prepareBulk();
         bulkRequestBuilder.add(client().prepareIndex("no_index", "type1", "1").setSource(XContentFactory.jsonBuilder().startObject().endObject()));
