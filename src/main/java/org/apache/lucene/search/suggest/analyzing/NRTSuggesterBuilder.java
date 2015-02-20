@@ -26,7 +26,7 @@ import org.apache.lucene.util.*;
 import org.apache.lucene.util.fst.*;
 
 import java.io.IOException;
-import java.util.PriorityQueue;
+import java.util.*;
 
 /**
  * Builder for {@link org.apache.lucene.search.suggest.analyzing.NRTSuggester}
@@ -112,7 +112,7 @@ public class NRTSuggesterBuilder<W extends Comparable<W>> {
      * {@link NRTSuggester#load(org.apache.lucene.store.IndexInput)}
      */
     public boolean store(DataOutput output) throws IOException {
-        final FST<? extends PairOutputs.Pair<W, BytesRef>> build = builder.build();
+        final FST<ScoreOutputs.ScoreOutput<W>> build = builder.build();
         if (build == null) {
             return false;
         }
@@ -134,22 +134,22 @@ public class NRTSuggesterBuilder<W extends Comparable<W>> {
     }
 
     final static class FSTBuilder<W extends Comparable<W>> {
-        private PairOutputs<W, BytesRef> outputs;
-        private Builder<PairOutputs.Pair<W, BytesRef>> builder;
+        //private PairOutputs<ScoreOutputs.ScoreOutput<W>, BytesRef> outputs;
+        private Builder<ScoreOutputs.ScoreOutput<W>> builder;
         private final OutputConfiguration<W> outputConfiguration;
         private final IntsRefBuilder scratchInts = new IntsRefBuilder();
         private final BytesRefBuilder analyzed = new BytesRefBuilder();
-        private final PriorityQueue<Entry<W>> entries;
+        private final List<ScoreOutputs.Entry<W>> entries;
         private final int payloadSep;
         private final int endByte;
 
         FSTBuilder(OutputConfiguration<W> outputConfiguration, int payloadSep, int endByte) {
             this.payloadSep = payloadSep;
             this.endByte = endByte;
-            this.outputs = new PairOutputs<>(outputConfiguration.outputSingleton(), ByteSequenceOutputs.getSingleton());
+            //this.outputs = new PairOutputs<>(outputConfiguration.outputSingleton(), ByteSequenceOutputs.getSingleton()); // outputConfiguration.outputSingleton()
             this.outputConfiguration = outputConfiguration;
-            this.entries = new PriorityQueue<>();
-            this.builder = new Builder<>(FST.INPUT_TYPE.BYTE1, outputs);
+            this.entries = new ArrayList<>();
+            this.builder = new Builder<>(FST.INPUT_TYPE.BYTE1, outputConfiguration.outputSingleton());
         }
 
 
@@ -167,6 +167,16 @@ public class NRTSuggesterBuilder<W extends Comparable<W>> {
             int numArcs = 0;
             int numDedupBytes = 1;
             int entryCount = entries.size();
+
+            Util.toIntsRef(analyzed.get(), scratchInts);
+            CollectionUtil.timSort(entries, new Comparator<ScoreOutputs.Entry<W>>() {
+                @Override
+                public int compare(ScoreOutputs.Entry<W> o1, ScoreOutputs.Entry<W> o2) {
+                    return o1.weight().compareTo(o2.weight());
+                }
+            });
+            builder.add(scratchInts.get(), ScoreOutputs.fromEntries(entries));
+            /*
             analyzed.grow(analyzed.length() + 1);
             analyzed.setLength(analyzed.length() + 1);
             for (Entry<W> entry : entries) {
@@ -180,8 +190,9 @@ public class NRTSuggesterBuilder<W extends Comparable<W>> {
                 }
                 analyzed.setByteAt(analyzed.length() - 1, (byte) numArcs++);
                 Util.toIntsRef(analyzed.get(), scratchInts);
-                builder.add(scratchInts.get(), outputs.newPair(entry.weight, entry.payload));
+                builder.add(scratchInts.get(), outputs.newPair(new ScoreOutputs.ScoreOutput<>(Arrays.asList(entry.weight)), entry.payload));
             }
+            */
             entries.clear();
             return entryCount;
         }
@@ -199,13 +210,13 @@ public class NRTSuggesterBuilder<W extends Comparable<W>> {
             return Math.min(maxArcs, 255);
         }
 
-        FST<PairOutputs.Pair<W, BytesRef>> build() throws IOException {
+        FST<ScoreOutputs.ScoreOutput<W>> build() throws IOException {
             return builder.finish();
         }
 
-        private final static class Entry<W extends Comparable<W>> implements Comparable<Entry<W>> {
-            final BytesRef payload;
-            final W weight;
+        private final static class Entry<W extends Comparable<W>> implements ScoreOutputs.Entry<W> {
+            private final BytesRef payload;
+            private final W weight;
 
             public Entry(BytesRef payload, W weight) {
                 this.payload = payload;
@@ -213,8 +224,13 @@ public class NRTSuggesterBuilder<W extends Comparable<W>> {
             }
 
             @Override
-            public int compareTo(Entry<W> o) {
-                return weight.compareTo(o.weight);
+            public BytesRef payload() {
+                return payload;
+            }
+
+            @Override
+            public W weight() {
+                return weight;
             }
         }
     }

@@ -20,6 +20,8 @@
 package org.apache.lucene.search.suggest.analyzing;
 
 import org.apache.lucene.store.ByteArrayDataInput;
+import org.apache.lucene.store.DataInput;
+import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.*;
 import org.apache.lucene.util.automaton.Automata;
 import org.apache.lucene.util.automaton.Automaton;
@@ -27,14 +29,86 @@ import org.apache.lucene.util.fst.*;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.*;
 
 public class TopNSearcherTest extends LuceneTestCase {
 
+    //SCRATCH
+
     @Test
+    public void scratchlong() throws Exception {
+
+        List<Entry<Long>> inputs = new ArrayList<>();
+        inputs.add(new Entry<>("term1", 1l, 1));
+        inputs.add(new Entry<>("term1", 2l, 2));
+        inputs.add(new Entry<>("term1", 3l, 3));
+        inputs.add(new Entry<>("te2", 4l, 4));
+        inputs.add(new Entry<>("te2", 5l, 5));
+        inputs.add(new Entry<>("tem2", 6l, 6));
+        AbstractMap.SimpleEntry<Integer, FST<ScoreOutputs.ScoreOutput<Long>>> build = build(longOutputConfiguration, inputs.toArray(new Entry[inputs.size()]));
+
+        try {
+            PrintWriter pw = new PrintWriter("/tmp/out.dot");
+            Util.toDot(build.getValue(), pw, true, true);
+            pw.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        TestTopNSearcher<Long> longTestTopNSearcher = new TestTopNSearcher<>(build.getValue(), 3, 3);
+
+        Map<BytesRef, List<Entry>> result = query(longTestTopNSearcher, "tem");
+        for (Map.Entry<BytesRef, List<Entry>> bytesRefListEntry : result.entrySet()) {
+            System.out.println(bytesRefListEntry.getKey().utf8ToString());
+            for (Entry entry : bytesRefListEntry.getValue()) {
+                System.out.println(" >> (" + entry.term + ", " + entry.weight + ", " + entry.docID+ ")");
+            }
+        }
+
+    }
+
+    @Test
+    public void scratch() throws Exception {
+
+        List<Entry<BytesRef>> inputs = new ArrayList<>();
+        inputs.add(new Entry<>("term1", new BytesRef("abcdef"), 1));
+        inputs.add(new Entry<>("term1", new BytesRef("abdeef"), 2));
+        inputs.add(new Entry<>("term1", new BytesRef("badefg"), 3));
+        inputs.add(new Entry<>("te2", new BytesRef("abcdef"), 4));
+        inputs.add(new Entry<>("te2", new BytesRef("abdeef"), 5));
+        inputs.add(new Entry<>("tem2", new BytesRef("badefg"), 6));
+        AbstractMap.SimpleEntry<Integer, FST<ScoreOutputs.ScoreOutput<BytesRef>>> build = build(bytesRefOutputConfiguration, inputs.toArray(new Entry[inputs.size()]));
+
+        try {
+            PrintWriter pw = new PrintWriter("/tmp/out.dot");
+            Util.toDot(build.getValue(), pw, true, true);
+            pw.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+    }
+    final static ScoreOutputs<BytesRef> binaryScoreOutputs = new BinaryScoreOutputs(ByteSequenceOutputs.getSingleton());
+    ContextAwareScorer.OutputConfiguration<BytesRef> bytesRefOutputConfiguration = new ContextAwareScorer.OutputConfiguration<BytesRef>() {
+        @Override
+        public ScoreOutputs<BytesRef> outputSingleton() {
+            return binaryScoreOutputs;
+        }
+
+        @Override
+        public BytesRef encode(BytesRef input) {
+            return input;
+        }
+
+        @Override
+        public BytesRef decode(BytesRef output) {
+            return output;
+        }
+    };
     public void testSimple() throws Exception {
         Entry[] inputs = {new Entry("term1", 1l, 1), new Entry("term1", 2l, 2), new Entry("term2", 3l, 3)};
-        Map.Entry<Integer, FST<PairOutputs.Pair<Long, BytesRef>>> build = build(outputConfiguration, inputs);
+        AbstractMap.SimpleEntry<Integer, FST<ScoreOutputs.ScoreOutput<Long>>> build = build(longOutputConfiguration, inputs);
         TestTopNSearcher testTopNSearcher = new TestTopNSearcher(build.getValue(), 2, 2, build.getKey());
         Map<BytesRef, List<Entry>> result = query(testTopNSearcher, "term");
         assertResults(mapByTerm(inputs), result);
@@ -53,8 +127,8 @@ public class TopNSearcherTest extends LuceneTestCase {
         }
         int pruneNFirstLeaves = 3;
 
-        Map.Entry<Integer, FST<PairOutputs.Pair<Long, BytesRef>>> build = build(outputConfiguration, inputs);
-        TestTopNSearcher testTopNSearcher = new TestTopNSearcher(build.getValue(), nterms, nLeaf, build.getKey(), pruneNFirstLeaves);
+        AbstractMap.SimpleEntry<Integer, FST<ScoreOutputs.ScoreOutput<Long>>> build = build(longOutputConfiguration, inputs);
+        TestTopNSearcher testTopNSearcher = new TestTopNSearcher(build.getValue(), nterms, build.getKey(), pruneNFirstLeaves);
         Map<BytesRef, List<Entry>> result = query(testTopNSearcher, "term");
         Map<BytesRef, List<Entry>> stringListMap = mapByTerm(inputs);
         for (BytesRef term : stringListMap.keySet()) {
@@ -67,7 +141,7 @@ public class TopNSearcherTest extends LuceneTestCase {
     @Test
     public void testFullTermSearch() throws Exception {
         Entry[] inputs = {new Entry("term1", 1l, 1), new Entry("term1", 2l, 2), new Entry("term1", 3l, 3)};
-        Map.Entry<Integer, FST<PairOutputs.Pair<Long, BytesRef>>> build = build(outputConfiguration, inputs);
+        AbstractMap.SimpleEntry<Integer, FST<ScoreOutputs.ScoreOutput<Long>>> build = build(longOutputConfiguration, inputs);
         TestTopNSearcher testTopNSearcher = new TestTopNSearcher(build.getValue(), 1, 3, build.getKey());
         Map<BytesRef, List<Entry>> result = query(testTopNSearcher, "term1");
         assertResults(mapByTerm(inputs), result);
@@ -90,20 +164,22 @@ public class TopNSearcherTest extends LuceneTestCase {
         }
     }
 
-    private static Map<BytesRef, List<Entry>> query(TestTopNSearcher searcher, String term) throws IOException {
+    private static <W> Map<BytesRef, List<Entry>> query(TestTopNSearcher<W> searcher, String term) throws IOException {
         Automaton automaton = Automata.makeString(term);
-        List<FSTUtil.Path<PairOutputs.Pair<Long, BytesRef>>> paths = FSTUtil.intersectPrefixPaths(automaton, searcher.fst);
-        for (FSTUtil.Path<PairOutputs.Pair<Long, BytesRef>> path : paths) {
+        //List<FSTUtil.Path<? extends ScoreOutputs.ScoreOutput<?>>> paths =
+        List<FSTUtil.Path<ScoreOutputs.ScoreOutput<W>>> paths = FSTUtil.intersectPrefixPaths(automaton, searcher.fst);
+        for (FSTUtil.Path<ScoreOutputs.ScoreOutput<W>> path : paths) {
             searcher.addStartPaths(path.fstNode, path.output, false, path.input);
         }
         searcher.search();
         return searcher.getResults();
     }
 
-    ContextAwareScorer.OutputConfiguration<Long> outputConfiguration = new ContextAwareScorer.OutputConfiguration<Long>() {
+    final static ScoreOutputs<Long> longScoreOutputs = new LongScoreOutputs(PositiveIntOutputs.getSingleton());
+    ContextAwareScorer.OutputConfiguration<Long> longOutputConfiguration = new ContextAwareScorer.OutputConfiguration<Long>() {
         @Override
-        public Outputs<Long> outputSingleton() {
-            return PositiveIntOutputs.getSingleton();
+        public ScoreOutputs<Long> outputSingleton() {
+            return longScoreOutputs;
         }
 
         @Override
@@ -120,12 +196,12 @@ public class TopNSearcherTest extends LuceneTestCase {
         }
     };
 
-    private static class Entry {
+    private static class Entry<W> {
         private final String term;
-        private final long weight;
+        private final W weight;
         private final int docID;
 
-        public Entry(String term, long weight, int docID) {
+        public Entry(String term, W weight, int docID) {
             this.term = term;
             this.weight = weight;
             this.docID = docID;
@@ -133,15 +209,15 @@ public class TopNSearcherTest extends LuceneTestCase {
 
     }
 
-    private Map<BytesRef, List<Entry>> mapByTerm(Entry... entries) {
-        Map<BytesRef, List<Entry>> entriesByTerm = new TreeMap<>(new Comparator<BytesRef>() {
+    private <W> Map<BytesRef, List<Entry<W>>> mapByTerm(Entry<W>... entries) {
+        Map<BytesRef, List<Entry<W>>> entriesByTerm = new TreeMap<>(new Comparator<BytesRef>() {
             @Override
             public int compare(BytesRef o1, BytesRef o2) {
                 return o1.compareTo(o2);
             }
         });
-        for (Entry entry : entries) {
-            final List<Entry> entryList;
+        for (Entry<W> entry : entries) {
+            final List<Entry<W>> entryList;
             BytesRef entryTerm = new BytesRef(entry.term);
             if (!entriesByTerm.containsKey(entryTerm)) {
                 entryList = new ArrayList<>();
@@ -152,6 +228,7 @@ public class TopNSearcherTest extends LuceneTestCase {
             entryList.add(entry);
         }
 
+            /* TODO
         for (Map.Entry<BytesRef, List<Entry>> stringListEntry : entriesByTerm.entrySet()) {
 
             Collections.sort(stringListEntry.getValue(), new Comparator<Entry>() {
@@ -161,18 +238,19 @@ public class TopNSearcherTest extends LuceneTestCase {
                 }
             });
         }
+            */
         return entriesByTerm;
 
     }
 
-    private Map.Entry<Integer, FST<PairOutputs.Pair<Long, BytesRef>>> build(ContextAwareScorer.OutputConfiguration<Long> outputConfiguration, Entry... entries) throws IOException {
-      NRTSuggesterBuilder.FSTBuilder<Long> builder = new NRTSuggesterBuilder.FSTBuilder<>(outputConfiguration, NRTSuggesterBuilder.PAYLOAD_SEP, NRTSuggesterBuilder.END_BYTE);
-        Map<BytesRef, List<Entry>> entriesByTerm = mapByTerm(entries);
+    private <W extends Comparable<W>> AbstractMap.SimpleEntry<Integer, FST<ScoreOutputs.ScoreOutput<W>>> build(ContextAwareScorer.OutputConfiguration<W> outputConfiguration, Entry... entries) throws IOException {
+      NRTSuggesterBuilder.FSTBuilder<W> builder = new NRTSuggesterBuilder.FSTBuilder<>(outputConfiguration, NRTSuggesterBuilder.PAYLOAD_SEP, NRTSuggesterBuilder.END_BYTE);
+        Map<BytesRef, List<Entry<W>>> entriesByTerm = mapByTerm(entries);
         int maxFormPerLeaf = 0;
-        for (Map.Entry<BytesRef, List<Entry>> termEntries : entriesByTerm.entrySet()) {
+        for (Map.Entry<BytesRef, List<Entry<W>>> termEntries : entriesByTerm.entrySet()) {
             BytesRef term = termEntries.getKey();
             builder.startTerm(term);
-            for (Entry entry : termEntries.getValue()) {
+            for (Entry<W> entry : termEntries.getValue()) {
                 builder.addEntry(entry.docID, term, entry.weight);
             }
             builder.finishTerm();
@@ -182,44 +260,45 @@ public class TopNSearcherTest extends LuceneTestCase {
         return new AbstractMap.SimpleEntry<>(maxFormPerLeaf, builder.build());
     }
 
-    private class TestTopNSearcher extends TopNSearcher<PairOutputs.Pair<Long, BytesRef>> {
+    private class TestTopNSearcher<W> extends TopNSearcher<ScoreOutputs.ScoreOutput<W>> {
 
         private Map<BytesRef, List<Entry>> results = new HashMap<>();
         private List<Entry> currentResults = new ArrayList<>();
 
         private BytesRefBuilder currentKeyBuilder = new BytesRefBuilder();
         private CharsRefBuilder spare = new CharsRefBuilder();
-        private final FST<PairOutputs.Pair<Long, BytesRef>> fst;
+        private final FST<ScoreOutputs.ScoreOutput<W>> fst;
         private final int pruneFirstNLeaves;
         private int leafCount;
 
-        public TestTopNSearcher(FST<PairOutputs.Pair<Long, BytesRef>> fst, int topN, int nLeaf, int maxQueueDepth) {
-            this(fst, topN, nLeaf, maxQueueDepth, 0);
+        public TestTopNSearcher(FST<ScoreOutputs.ScoreOutput<W>> fst, int topN, int maxQueueDepth) {
+            this(fst, topN, maxQueueDepth, 0);
         }
-        public TestTopNSearcher(FST<PairOutputs.Pair<Long, BytesRef>> fst, int topN, int nLeaf, int maxQueueDepth, int pruneFirstNLeaves) {
-            super(fst, topN, nLeaf, NRTSuggesterBuilder.END_BYTE, topN * maxQueueDepth, new Comparator<PairOutputs.Pair<Long, BytesRef>>() {
+        public TestTopNSearcher(FST<ScoreOutputs.ScoreOutput<W>> fst, int topN, int maxQueueDepth, int pruneFirstNLeaves) {
+            super(fst, topN, topN * maxQueueDepth, new Comparator<ScoreOutputs.ScoreOutput<W>>() {
                 @Override
-                public int compare(PairOutputs.Pair<Long, BytesRef> o1, PairOutputs.Pair<Long, BytesRef> o2) {
-                    return o1.output1.compareTo(o2.output1);
+                public int compare(ScoreOutputs.ScoreOutput<W> o1, ScoreOutputs.ScoreOutput<W> o2) {
+                    return 0;
                 }
             });
             this.fst = fst;
             this.pruneFirstNLeaves = pruneFirstNLeaves;
         }
 
-        @Override
-        protected void onLeafNode(IntsRef input, PairOutputs.Pair<Long, BytesRef> output) {
-            Util.toBytesRef(input, currentKeyBuilder);
-            leafCount = 0;
-        }
+        //@Override
+        //protected void onLeafNode(IntsRef input, PairOutputs.Pair<ScoreOutputs.ScoreOutput<Long>, BytesRef> output) {
+        //    Util.toBytesRef(input, currentKeyBuilder);
+        //    leafCount = 0;
+        //}
 
-        @Override
-        protected boolean collectOutput(PairOutputs.Pair<Long, BytesRef> output) throws IOException {
-            leafCount++;
-            if (leafCount <= pruneFirstNLeaves) {
-                return false;
+        //@Override
+        //protected boolean collectOutput(PairOutputs.Pair<ScoreOutputs.ScoreOutput<Long>, BytesRef> output) throws IOException {
+        //    leafCount++;
+        //    if (leafCount <= pruneFirstNLeaves) {
+        /*        return false;
             }
-            long weight = outputConfiguration.decode(output.output1);
+            //TODO
+            long weight = 0;//longOutputConfiguration.decode(output.output1);
 
             int surfaceFormLen = -1;
             for (int i = 0; i < output.output2.length; i++) {
@@ -240,9 +319,36 @@ public class TopNSearcherTest extends LuceneTestCase {
             results.put(currentKeyBuilder.toBytesRef(), new ArrayList<>(currentResults));
             currentResults.clear();
         }
-
+*/
         public Map<BytesRef, List<Entry>> getResults() {
             return results;
+        }
+
+        @Override
+        protected int acceptResults(IntsRef input, ScoreOutputs.ScoreOutput<W> output) {
+            //TODO: IMPLEMENT
+            Util.toBytesRef(input, currentKeyBuilder);
+
+            for (int i = 0; i < output.size(); i++) {
+                BytesRef payload = output.payload(i);
+                W weight = output.weight(i);
+
+                int surfaceFormLen = -1;
+                for (int j = 0; j < payload.length; j++) {
+                    if (payload.bytes[payload.offset + j] == NRTSuggesterBuilder.PAYLOAD_SEP) {
+                        surfaceFormLen = j;
+                        break;
+                    }
+                }
+                assert surfaceFormLen != -1 : "no payloadSep found, unable to determine surface form";
+                spare.copyUTF8Bytes(payload.bytes, payload.offset, surfaceFormLen);
+                ByteArrayDataInput inputDocID = new ByteArrayDataInput(payload.bytes, surfaceFormLen + payload.offset + 1, payload.length - (surfaceFormLen + payload.offset));
+                currentResults.add(new Entry<>(spare.toString(), weight, inputDocID.readVInt()));
+            }
+            results.put(currentKeyBuilder.toBytesRef(), new ArrayList<>(currentResults));
+            int acceptedResultCount = currentResults.size();
+            currentResults.clear();
+            return acceptedResultCount;
         }
     }
 }

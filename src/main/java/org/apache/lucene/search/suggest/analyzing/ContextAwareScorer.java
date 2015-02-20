@@ -73,7 +73,7 @@ public abstract class ContextAwareScorer<T extends Comparable<T>> {
      */
     public static interface OutputConfiguration<T extends Comparable<T>> {
 
-        Outputs<T> outputSingleton();
+        ScoreOutputs<T> outputSingleton();
 
         T encode(T input);
 
@@ -88,9 +88,11 @@ public abstract class ContextAwareScorer<T extends Comparable<T>> {
         @Override
         protected OutputConfiguration<Long> getOutputConfiguration() {
             return new OutputConfiguration<Long>() {
+
                 @Override
-                public Outputs<Long> outputSingleton() {
-                    return PositiveIntOutputs.getSingleton();
+                public ScoreOutputs<Long> outputSingleton() {
+                    // TODO: FIX
+                    return new LongScoreOutputs(PositiveIntOutputs.getSingleton());
                 }
 
                 @Override
@@ -118,8 +120,8 @@ public abstract class ContextAwareScorer<T extends Comparable<T>> {
         protected OutputConfiguration<BytesRef> getOutputConfiguration() {
             return new OutputConfiguration<BytesRef>() {
                 @Override
-                public Outputs<BytesRef> outputSingleton() {
-                    return ByteSequenceOutputs.getSingleton();
+                public ScoreOutputs<BytesRef> outputSingleton() {
+                    return new BinaryScoreOutputs(ByteSequenceOutputs.getSingleton());
                 }
 
                 @Override

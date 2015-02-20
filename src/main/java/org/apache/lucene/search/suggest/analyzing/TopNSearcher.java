@@ -48,8 +48,6 @@ public abstract class TopNSearcher<T> {
     private final FST<T> fst;
     private final FST.BytesReader bytesReader;
     private final int topN;
-    private final int nLeaf;
-    private final int leafLabel;
     private final int maxQueueDepth;
 
     private final FST.Arc<T> scratchArc = new FST.Arc<>();
@@ -57,29 +55,23 @@ public abstract class TopNSearcher<T> {
     private final Comparator<T> comparator;
 
     private TreeSet<Util.FSTPath<T>> queue = null;
-    private TreeSet<Util.FSTPath<T>> leafQueue = null;
 
     /**
      * Creates an unbounded TopNSearcher
      *
      * @param fst           the {@link org.apache.lucene.util.fst.FST} to search on
      * @param topN          the number of top scoring inputs to retrieve
-     * @param nLeaf         the number of top scoring outputs to retrieve per input
-     * @param leafLabel     the input label that marks the beginning of the output leaves
      * @param maxQueueDepth the maximum size of the queue of possible top entries
      * @param comparator    the comparator to select the top N
      */
-    public TopNSearcher(FST<T> fst, int topN, int nLeaf, int leafLabel, int maxQueueDepth, Comparator<T> comparator) {
+    public TopNSearcher(FST<T> fst, int topN, int maxQueueDepth, Comparator<T> comparator) {
         this.fst = fst;
         this.bytesReader = fst.getBytesReader();
         this.topN = topN;
-        this.nLeaf = nLeaf;
-        this.leafLabel = leafLabel;
         this.maxQueueDepth = maxQueueDepth;
         this.comparator = comparator;
 
         queue = new TreeSet<>(new TieBreakByInputComparator<>(comparator));
-        leafQueue = new TreeSet<>(new TieBreakByInputComparator<>(comparator));
 
     }
 
@@ -131,9 +123,7 @@ public abstract class TopNSearcher<T> {
         // and add the arc.label to the end
         IntsRefBuilder newInput = new IntsRefBuilder();
         newInput.copyInts(path.input.get());
-        if (path.arc.label != leafLabel) {
-            newInput.append(path.arc.label);
-        }
+        newInput.append(path.arc.label);
         final Util.FSTPath<T> newPath = new Util.FSTPath<>(cost, path.arc, newInput);
 
         queue.add(newPath);
@@ -141,16 +131,6 @@ public abstract class TopNSearcher<T> {
         if (queue.size() == maxQueueDepth + 1) {
             queue.pollLast();
         }
-    }
-
-    protected void addLeafPath(Util.FSTPath<T> path) {
-        T cost = fst.outputs.add(path.cost, path.arc.output);
-        IntsRefBuilder newInput = new IntsRefBuilder();
-        newInput.copyInts(path.input.get());
-        newInput.append(path.arc.label);
-        final Util.FSTPath<T> newPath = new Util.FSTPath<>(cost, path.arc, newInput);
-
-        leafQueue.add(newPath);
     }
 
     /**
@@ -266,15 +246,6 @@ public abstract class TopNSearcher<T> {
                 System.out.println("\n    cycle path: " + path.input.get());
             }
 
-            boolean isLeaf = path.arc.label == leafLabel;
-            boolean inLeaf = false;
-            int acceptedLeaves = 0;
-
-            if (isLeaf) {
-                onLeafNode(path.input.get(), path.cost);
-                inLeaf = true;
-            }
-
             // For each input letter:
             while (true) {
                 fst.readFirstTargetArc(path.arc, path.arc, fstReader);
@@ -294,13 +265,9 @@ public abstract class TopNSearcher<T> {
                         } else if (!foundZero) {
                             scratchArc.copyFrom(path.arc);
                             foundZero = true;
-                        } else if (inLeaf) {
-                            addLeafPath(path);
                         } else {
                             addIfCompetitive(path);
                         }
-                    } else if (inLeaf) {
-                        addLeafPath(path);
                     } else if (queue != null) {
                         addIfCompetitive(path);
                     }
@@ -318,78 +285,27 @@ public abstract class TopNSearcher<T> {
                     // scratchArc
                     path.arc.copyFrom(scratchArc);
                 }
-                if (inLeaf) {
-                    // The path with the lowest cost is final
-                    // so can scan the leafQueue for any other paths
-                    // that are already final
-                    if (path.arc.isFinal()) {
-                        T cost = fst.outputs.add(path.cost, path.arc.output);
-                        while (path != null && path.arc.isFinal()) {
-                            if (!prune(cost)) {
-                                if (collectOutput(cost)) {
-                                    if (++acceptedLeaves == nLeaf) {
-                                        break;
-                                    }
-                                }
-                            }
-                            path = leafQueue.pollFirst();
-                            if (path != null) {
-                                cost = path.cost;
-                            }
-                        }
-                        if (path == null || acceptedLeaves == nLeaf) {
-                            if (acceptedLeaves > 0) {
-                                resultCount++;
-                            } else {
-                                rejectCount++;
-                            }
-                            leafQueue.clear();
-                            onFinishNode();
-                            break;
-                        }
+                if (path.arc.label == FST.END_LABEL) {
+                    // Add final output:
+                    //System.out.println("    done!: " + path);
+                    T finalOutput = fst.outputs.add(path.cost, path.arc.output);
+                    int count = acceptResults(path.input.get(), finalOutput);
+                    if (count > 0) {
+                        resultCount += count;
                     } else {
-                        path.input.append(path.arc.label);
-                        path.cost = fst.outputs.add(path.cost, path.arc.output);
+                        rejectCount++;
                     }
+                    break;
                 } else {
-                    isLeaf = path.arc.label == leafLabel;
-                    path.cost = fst.outputs.add(path.cost, path.arc.output);
-                    if (isLeaf && !inLeaf) {
-                        onLeafNode(path.input.get(), path.cost);
-                        inLeaf = true;
-                    }
                     path.input.append(path.arc.label);
+                    path.cost = fst.outputs.add(path.cost, path.arc.output);
                 }
             }
         }
         return rejectCount + topN <= maxQueueDepth;
     }
 
-    /**
-     * Called exactly once when a leaf node for a <code>input</code>
-     * is found
-     * @param input the input up to the leaf node (excluding the leafLabel)
-     * @param output the output up to the leaf node
-     */
-    protected abstract void onLeafNode(IntsRef input, T output);
-
-    /**
-     * Called on finding a leaf node output.
-     *
-     * This will be called at most <code>nLeaf</code> + number of not accepted
-     * output.
-     *
-     * @param output full output at the leaf node
-     * @return true if output is accepted, false otherwise
-     * @throws IOException
-     */
-    protected abstract boolean collectOutput(T output) throws IOException;
-
-    /**
-     * Called on finishing processing all the output(s) at a leaf node
-     * @throws IOException
-     */
-    protected abstract void onFinishNode() throws IOException;
+    protected abstract int acceptResults(IntsRef input, T output);
 
     /**
      * Compares first by the provided comparator, and then

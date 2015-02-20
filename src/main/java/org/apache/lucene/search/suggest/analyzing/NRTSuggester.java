@@ -76,7 +76,7 @@ public class NRTSuggester<W extends Comparable<W>> extends SegmentLookup<W> {
      * weight is encoded according to {@link ContextAwareScorer#getOutputConfiguration()}
      * surface is the original, unanalyzed form followed by the docID
      */
-    private final FST<Pair<W, BytesRef>> fst;
+    private final FST<ScoreOutputs.ScoreOutput<W>> fst;
 
     /**
      * Highest number of analyzed paths we saw for any single
@@ -126,7 +126,7 @@ public class NRTSuggester<W extends Comparable<W>> extends SegmentLookup<W> {
 
     private final Scorer scorer;
 
-    private NRTSuggester(ContextAwareScorer<W> contextAwareScorer, FST<Pair<W, BytesRef>> fst,
+    private NRTSuggester(ContextAwareScorer<W> contextAwareScorer, FST<ScoreOutputs.ScoreOutput<W>> fst,
                          int maxAnalyzedPathsPerLeaf,
                          boolean preserveSep, boolean preservePositionIncrements,
                          int sepLabel, int payloadSep, int endByte, int holeCharacter) {
@@ -167,18 +167,18 @@ public class NRTSuggester<W extends Comparable<W>> extends SegmentLookup<W> {
             this.outputConfiguration = scorer.getOutputConfiguration();
         }
 
-        public boolean prune(W currentContext, Pair<W, BytesRef> pathCost) {
+        public boolean prune(W currentContext, W pathCost) {
             //TODO: we can add a strict mode, where the surfaceform/input will have to have the same prefix as the key/analyzed query
-            return contextAwareScorer.prune(currentContext, outputConfiguration.decode(pathCost.output1));
+            return contextAwareScorer.prune(currentContext, outputConfiguration.decode(pathCost));
         }
 
-        public Comparator<Pair<W, BytesRef>> getComparator(W currentContext) {
+        public Comparator<ScoreOutputs.ScoreOutput<W>> getComparator(W currentContext) {
             final Comparator<W> comparator = contextAwareScorer.comparator(currentContext);
-            return new Comparator<Pair<W, BytesRef>>() {
+            return new Comparator<ScoreOutputs.ScoreOutput<W>>() {
                 @Override
-                public int compare(Pair<W, BytesRef> o1, Pair<W, BytesRef> o2) {
-                    //TODO: we can also sort by the surface form here (for more relevant result w.r.t. input key)
-                    return comparator.compare(o1.output1, o2.output1);
+                public int compare(ScoreOutputs.ScoreOutput<W> o1, ScoreOutputs.ScoreOutput<W> o2) {
+                    //TODO
+                    return 0;//comparator.compare(o1.output1, o2.output1);
                 }
             };
         }
@@ -238,68 +238,67 @@ public class NRTSuggester<W extends Comparable<W>> extends SegmentLookup<W> {
         try {
 
             Automaton lookupAutomaton = toLookupAutomaton(queryAnalyzer, key);
-            final List<FSTUtil.Path<Pair<W, BytesRef>>> prefixPaths = FSTUtil.intersectPrefixPaths(lookupAutomaton, fst);
+            final List<FSTUtil.Path<ScoreOutputs.ScoreOutput<W>>> prefixPaths = FSTUtil.intersectPrefixPaths(lookupAutomaton, fst);
 
-            TopNSearcher<Pair<W,BytesRef>> searcher = new TopNSearcher<Pair<W, BytesRef>>(fst,
-                                                                   num, nLeaf, endByte,
-                                                                    // TODO: take into account filter cardinality
-                                                                   getMaxTopNSearcherQueueSize(num, liveDocsRatio),
-                                                                   scorer.getComparator(scoreContext)) {
+            TopNSearcher<ScoreOutputs.ScoreOutput<W>> searcher = new TopNSearcher<ScoreOutputs.ScoreOutput<W>>(fst, num,
+                    getMaxTopNSearcherQueueSize(num, liveDocsRatio), scorer.getComparator(scoreContext)) {
                 private final CharsRefBuilder spare = new CharsRefBuilder();
                 private final BytesRefBuilder currentKeyBuilder = new BytesRefBuilder();
                 private final List<Collector.ResultMetaData<W>> currentResultMetaDataList = new ArrayList<>(nLeaf);
                 private final Set<Integer> seenDocIds = new HashSet<>(nLeaf);
 
                 @Override
-                protected boolean prune(Pair<W, BytesRef> pathCost) {
-                    return scorer.prune(scoreContext, pathCost);
+                protected boolean prune(ScoreOutputs.ScoreOutput<W> pathCost) {
+                    //TODO
+                    return false;//scorer.prune(scoreContext, pathCost);
                 }
 
                 @Override
-                protected void onLeafNode(IntsRef input, Pair<W, BytesRef> output) {
+                protected int acceptResults(IntsRef input, ScoreOutputs.ScoreOutput<W> output) {
                     Util.toBytesRef(input, currentKeyBuilder);
-                }
+                    int acceptedCount = 0;
+                    for (int outputIndex : output.activeOutputs()) {
+                        BytesRef payload = output.payload(outputIndex);
+                        W weight = output.weight(outputIndex);
+                        int payloadSepIndex = parseSurfaceForm(payload, payloadSep, spare);
+                        int docID = parseDocID(payload, payloadSepIndex);
 
-                @Override
-                protected boolean collectOutput(Pair<W, BytesRef> output) throws IOException {
-                    int payloadSepIndex = parseSurfaceForm(output.output2, payloadSep, spare);
-                    int docID = parseDocID(output.output2, payloadSepIndex);
+                        // filter out deleted docs
+                        if (liveDocs != null && !liveDocs.get(docID)) {
+                            continue;
+                        }
 
-                    // filter out deleted docs
-                    if (liveDocs != null && !liveDocs.get(docID)) {
-                        return false;
-                    }
+                        // filter by filter context
+                        if (filter != null && !filter.bits().get(docID)) {
+                            continue;
+                        }
 
-                    // filter by filter context
-                    if (filter != null && !filter.bits().get(docID)) {
-                        return false;
-                    }
-
-                    // compute score
-                    // add new surface form
-                    if (!seenDocIds.contains(docID)) {
-                        W score = scorer.score(scoreContext, output.output1);
+                        if (seenDocIds.contains(docID)) {
+                            continue;
+                        }
+                        // compute score
+                        // add new surface form
+                        W score = scorer.score(scoreContext, weight);
                         currentResultMetaDataList.add(new Collector.ResultMetaData<>(spare.toCharsRef(), score, docID));
                         seenDocIds.add(docID);
-                        return true;
-                    }  else {
-                        return false;
+                        acceptedCount++;
                     }
-                }
-
-                @Override
-                protected void onFinishNode() throws IOException {
                     if (currentResultMetaDataList.size() > 0) {
-                        collector.collect(currentKeyBuilder.get().utf8ToString(), new ArrayList<>(currentResultMetaDataList));
-                        currentResultMetaDataList.clear();
+                        try {
+                            collector.collect(currentKeyBuilder.get().utf8ToString(), new ArrayList<>(currentResultMetaDataList));
+                        } catch (IOException e) {
+                            throw new IllegalStateException(e);
+                        } finally {
+                            currentResultMetaDataList.clear();
+                        }
                     }
                     seenDocIds.clear();
+                    return acceptedCount;
                 }
-
             };
 
             // TODO: add fuzzy support
-            for (FSTUtil.Path<Pair<W,BytesRef>> path : getFullPrefixPaths(prefixPaths, lookupAutomaton, fst)) {
+            for (FSTUtil.Path<ScoreOutputs.ScoreOutput<W>> path : getFullPrefixPaths(prefixPaths, lookupAutomaton, fst)) {
                 searcher.addStartPaths(path.fstNode, path.output, true, path.input);
             }
 
@@ -332,9 +331,9 @@ public class NRTSuggester<W extends Comparable<W>> extends SegmentLookup<W> {
     /**
      * Returns all completion paths to initialize the search.
      */
-    protected List<FSTUtil.Path<Pair<W, BytesRef>>> getFullPrefixPaths(List<FSTUtil.Path<Pair<W, BytesRef>>> prefixPaths,
+    protected List<FSTUtil.Path<ScoreOutputs.ScoreOutput<W>>> getFullPrefixPaths(List<FSTUtil.Path<ScoreOutputs.ScoreOutput<W>>> prefixPaths,
                                                                           Automaton lookupAutomaton,
-                                                                          FST<Pair<W, BytesRef>> fst)
+                                                                          FST<ScoreOutputs.ScoreOutput<W>> fst)
             throws IOException {
         return prefixPaths;
     }
@@ -367,8 +366,7 @@ public class NRTSuggester<W extends Comparable<W>> extends SegmentLookup<W> {
     public static <W extends Comparable<W>> NRTSuggester<W> load(IndexInput input) throws IOException {
         final ContextAwareScorer<W> contextAwareScorer = (ContextAwareScorer<W>) scoreProvider.get(input.readString());
         OutputConfiguration<W> outputConfiguration = contextAwareScorer.getOutputConfiguration();
-        final FST<Pair<W, BytesRef>> fst = new FST<>(input, new PairOutputs<>(
-                outputConfiguration.outputSingleton(), ByteSequenceOutputs.getSingleton()));
+        final FST<ScoreOutputs.ScoreOutput<W>> fst = new FST<>(input, outputConfiguration.outputSingleton());
         int maxAnalyzedPathsPerLeaf = input.readVInt();
         int options = input.readVInt();
         boolean preserveSep = (options & NRTSuggesterBuilder.SERIALIZE_PRESERVE_SEPARATORS) != 0;
