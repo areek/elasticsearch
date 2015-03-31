@@ -373,6 +373,11 @@ public class SearchPhaseController extends AbstractComponent {
                     continue;
                 }
                 hasSuggestions = true;
+                for (Suggest.Suggestion<? extends Suggest.Suggestion.Entry<? extends Suggest.Suggestion.Entry.Option>> suggestion : shardResult) {
+                    if (suggestion.timedOut()) {
+                        timedOut = true;
+                    }
+                }
                 Suggest.group(groupedSuggestions, shardResult);
             }
 

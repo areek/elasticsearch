@@ -77,9 +77,14 @@ public class RestSuggestAction extends BaseRestHandler {
             @Override
             public RestResponse buildResponse(SuggestResponse response, XContentBuilder builder) throws Exception {
                 RestStatus restStatus = RestStatus.status(response.getSuccessfulShards(), response.getTotalShards(), response.getShardFailures());
-                builder.startObject();
-                buildBroadcastShardsHeader(builder, response);
                 Suggest suggest = response.getSuggest();
+                builder.startObject();
+                if (suggest != null) {
+                    builder.field("timed_out", suggest.timedOut());
+                } else {
+                    builder.field("timed_out", false);
+                }
+                buildBroadcastShardsHeader(builder, response);
                 if (suggest != null) {
                     suggest.toXContent(builder, request);
                 }

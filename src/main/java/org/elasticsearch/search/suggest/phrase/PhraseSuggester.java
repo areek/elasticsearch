@@ -28,12 +28,14 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.CharsRefBuilder;
 import org.elasticsearch.ElasticsearchException;
+import org.elasticsearch.ElasticsearchTimeoutException;
 import org.elasticsearch.action.search.*;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.text.StringText;
 import org.elasticsearch.common.text.Text;
+import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.query.FilterBuilders;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.script.CompiledScript;
@@ -104,8 +106,22 @@ public final class PhraseSuggester extends Suggester<PhraseSuggestionContext> {
             response.addTerm(resultEntry);
 
             BytesRefBuilder byteSpare = new BytesRefBuilder();
+            MultiSearchResponse multiSearchResponse = null;
 
-            MultiSearchResponse multiSearchResponse = collate(suggestion, checkerResult, byteSpare, spare);
+            boolean timedOut = false;
+            MultiSearchRequestBuilder multiSearchRequestBuilder = client.prepareMultiSearch();
+            collate(suggestion, checkerResult, multiSearchRequestBuilder, byteSpare, spare);
+            int numCollateRequests = multiSearchRequestBuilder.request().requests().size();
+            if (numCollateRequests > 0) {
+                try {
+                    long timeOutInMillis = Math.max(5000l, numCollateRequests * 500l);
+                    multiSearchResponse = multiSearchRequestBuilder.get(TimeValue.timeValueMillis(timeOutInMillis));
+                } catch (ElasticsearchTimeoutException e) {
+                    // if timed out, ignore collate
+                    timedOut = true;
+                }
+            }
+            response.timedOut(timedOut);
             final boolean collateEnabled = multiSearchResponse != null;
             final boolean collatePrune = suggestion.collatePrune();
 
@@ -139,32 +155,27 @@ public final class PhraseSuggester extends Suggester<PhraseSuggestionContext> {
         return new PhraseSuggestion.Entry(new StringText(spare.toString()), 0, spare.length(), cutoffScore);
     }
 
-    private MultiSearchResponse collate(PhraseSuggestionContext suggestion, Result checkerResult, BytesRefBuilder byteSpare, CharsRefBuilder spare) throws IOException {
+    private void collate(PhraseSuggestionContext suggestion, Result checkerResult, MultiSearchRequestBuilder multiSearchRequestBuilder, BytesRefBuilder byteSpare, CharsRefBuilder spare) throws IOException {
         CompiledScript collateQueryScript = suggestion.getCollateQueryScript();
         CompiledScript collateFilterScript = suggestion.getCollateFilterScript();
-        MultiSearchResponse multiSearchResponse = null;
         if (collateQueryScript != null) {
-            multiSearchResponse = fetchMatchingDocCountResponses(checkerResult.corrections, collateQueryScript, false, suggestion, byteSpare, spare);
+            fetchMatchingDocCountResponses(checkerResult.corrections, collateQueryScript, false, suggestion, byteSpare, spare, multiSearchRequestBuilder);
         } else if (collateFilterScript != null) {
-            multiSearchResponse = fetchMatchingDocCountResponses(checkerResult.corrections, collateFilterScript, true, suggestion, byteSpare, spare);
+            fetchMatchingDocCountResponses(checkerResult.corrections, collateFilterScript, true, suggestion, byteSpare, spare, multiSearchRequestBuilder);
         }
-        return multiSearchResponse;
     }
 
-    private MultiSearchResponse fetchMatchingDocCountResponses(Correction[] corrections, CompiledScript collateScript,
+    private void fetchMatchingDocCountResponses(Correction[] corrections, CompiledScript collateScript,
                                                                boolean isFilter, PhraseSuggestionContext suggestions,
-                                                               BytesRefBuilder byteSpare, CharsRefBuilder spare) throws IOException {
+                                                               BytesRefBuilder byteSpare, CharsRefBuilder spare,
+                                                               MultiSearchRequestBuilder multiSearchRequestBuilder) throws IOException {
         Map<String, Object> vars = suggestions.getCollateScriptParams();
-        MultiSearchResponse multiSearchResponse = null;
-        MultiSearchRequestBuilder multiSearchRequestBuilder = client.prepareMultiSearch();
-        boolean requestAdded = false;
         SearchRequestBuilder req;
         for (Correction correction : corrections) {
             spare.copyUTF8Bytes(correction.join(SEPARATOR, byteSpare, null, null));
             vars.put(SUGGESTION_TEMPLATE_VAR_NAME, spare.toString());
             ExecutableScript executable = scriptService.executable(collateScript, vars);
             BytesReference querySource = (BytesReference) executable.run();
-            requestAdded = true;
             if (isFilter) {
                 req = client.prepareSearch()
                         .setPreference(suggestions.getPreference())
@@ -180,11 +191,6 @@ public final class PhraseSuggester extends Suggester<PhraseSuggestionContext> {
             }
             multiSearchRequestBuilder.add(req);
         }
-        if (requestAdded) {
-            multiSearchResponse = multiSearchRequestBuilder.get();
-        }
-
-        return multiSearchResponse;
     }
 
     private static boolean hasMatchingDocs(MultiSearchResponse multiSearchResponse, int index) {

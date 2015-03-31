@@ -20,17 +20,23 @@
 package org.elasticsearch.search.suggest;
 
 import com.carrotsearch.randomizedtesting.annotations.Nightly;
+import com.carrotsearch.randomizedtesting.annotations.Seed;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import com.google.common.io.Resources;
 import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchIllegalStateException;
+import org.elasticsearch.ExceptionsHelper;
+import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.action.ShardOperationFailedException;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.*;
 import org.elasticsearch.action.suggest.SuggestRequestBuilder;
 import org.elasticsearch.action.suggest.SuggestResponse;
+import org.elasticsearch.common.util.concurrent.EsRejectedExecutionException;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.search.suggest.SuggestBuilder.SuggestionBuilder;
@@ -43,6 +49,8 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 
 import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_REPLICAS;
@@ -63,7 +71,7 @@ import static org.hamcrest.Matchers.*;
 public class SuggestSearchTests extends ElasticsearchIntegrationTest {
 
     @Test // see #3196
-    public void testSuggestAcrossMultipleIndices() throws IOException {
+    public void testSuggestAcrossMultipleIndices() throws IOException, InterruptedException {
         createIndex("test");
         ensureGreen();
 
@@ -154,7 +162,7 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
     }
 
     @Test // see #3037
-    public void testSuggestModes() throws IOException {
+    public void testSuggestModes() throws IOException, InterruptedException {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(settingsBuilder()
                 .put(SETTING_NUMBER_OF_SHARDS, 1)
                 .put(SETTING_NUMBER_OF_REPLICAS, 0)
@@ -412,7 +420,7 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
     }
     
     @Test // see #2817
-    public void testStopwordsOnlyPhraseSuggest() throws ElasticsearchException, IOException {
+    public void testStopwordsOnlyPhraseSuggest() throws ElasticsearchException, IOException, InterruptedException {
         assertAcked(prepareCreate("test").addMapping("typ1", "body", "type=string,analyzer=stopwd").setSettings(
                 settingsBuilder()
                         .put("index.analysis.analyzer.stopwd.tokenizer", "whitespace")
@@ -430,7 +438,7 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
     }
     
     @Test
-    public void testPrefixLength() throws ElasticsearchException, IOException {  // Stopped here
+    public void testPrefixLength() throws ElasticsearchException, IOException, InterruptedException {  // Stopped here
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(settingsBuilder()
                 .put(SETTING_NUMBER_OF_SHARDS, 1)
                 .put("index.analysis.analyzer.reverse.tokenizer", "standard")
@@ -474,8 +482,8 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
     
     @Test
     @Slow
-    @Nightly
-    public void testMarvelHerosPhraseSuggest() throws ElasticsearchException, IOException {
+    //@Nightly
+    public void testMarvelHerosPhraseSuggest() throws ElasticsearchException, IOException, InterruptedException {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(settingsBuilder()
                 .put(indexSettings())
                 .put("index.analysis.analyzer.reverse.tokenizer", "standard")
@@ -604,7 +612,7 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
     }
     
     @Test
-    public void testSizePararm() throws IOException {
+    public void testSizePararm() throws IOException, InterruptedException {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(settingsBuilder()
                 .put(SETTING_NUMBER_OF_SHARDS, 1)
                 .put("index.analysis.analyzer.reverse.tokenizer", "standard")
@@ -670,8 +678,8 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
     }
 
     @Test
-    @Nightly
-    public void testPhraseBoundaryCases() throws ElasticsearchException, IOException {
+    //@Nightly
+    public void testPhraseBoundaryCases() throws ElasticsearchException, IOException, InterruptedException {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(settingsBuilder()
                 .put(indexSettings()).put(SETTING_NUMBER_OF_SHARDS, 1) // to get reliable statistics we should put this all into one shard
                 .put("index.analysis.analyzer.body.tokenizer", "standard")
@@ -878,7 +886,7 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
      * score during the reduce phase.  Failures don't occur every time - maybe two out of five tries but we don't repeat it to save time.
      */
     @Test
-    public void testSearchForRarePhrase() throws ElasticsearchException, IOException {
+    public void testSearchForRarePhrase() throws ElasticsearchException, IOException, InterruptedException {
         // If there isn't enough chaf per shard then shards can become unbalanced, making the cutoff recheck this is testing do more harm then good.
         int chafPerShard = 100;
 
@@ -945,7 +953,7 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
      * If the suggester finds tons of options then picking the right one is slow without <<<INSERT SOLUTION HERE>>>.
      */
     @Test
-    @Nightly
+    //@Nightly
     public void suggestWithManyCandidates() throws InterruptedException, ExecutionException, IOException {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(settingsBuilder()
                 .put(indexSettings())
@@ -1091,6 +1099,10 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
         // assertThat(total, lessThan(1000L)); // Takes many seconds without fix - just for debugging
     }
 
+    //mvn clean test -Dtests.seed=4DD14018B8F552D1
+    // -Dtests.class=org.elasticsearch.search.suggest.SuggestSearchTests
+    // -Dtests.method="testPhraseSuggesterCollate"
+    // -Dtests.locale=et -Dtests.timezone=America/Sitka -Dtests.processors=8
     @Test
     public void testPhraseSuggesterCollate() throws InterruptedException, ExecutionException, IOException {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(settingsBuilder()
@@ -1101,7 +1113,8 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
                 .put("index.analysis.filter.my_shingle.type", "shingle")
                 .put("index.analysis.filter.my_shingle.output_unigrams", true)
                 .put("index.analysis.filter.my_shingle.min_shingle_size", 2)
-                .put("index.analysis.filter.my_shingle.max_shingle_size", 3));
+                .put("index.analysis.filter.my_shingle.max_shingle_size", 3)
+                .put("threadpool.search.size", 1));
 
         XContentBuilder mapping = XContentFactory.jsonBuilder()
                 .startObject()
@@ -1258,15 +1271,15 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
 
     }
 
-    protected Suggest searchSuggest(SuggestionBuilder<?>... suggestion) {
+    protected Suggest searchSuggest(SuggestionBuilder<?>... suggestion) throws InterruptedException {
         return searchSuggest(null, suggestion);
     }
 
-    protected Suggest searchSuggest(String suggestText, SuggestionBuilder<?>... suggestions) {
+    protected Suggest searchSuggest(String suggestText, SuggestionBuilder<?>... suggestions) throws InterruptedException {
         return searchSuggest(suggestText, 0, suggestions);
     }
 
-    protected Suggest searchSuggest(String suggestText, int expectShardsFailed, SuggestionBuilder<?>... suggestions) {
+    protected Suggest searchSuggest(String suggestText, int expectShardsFailed, SuggestionBuilder<?>... suggestions) throws InterruptedException {
         if (randomBoolean()) {
             SearchRequestBuilder builder = client().prepareSearch().setSearchType(SearchType.COUNT);
             if (suggestText != null) {
@@ -1275,9 +1288,13 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
             for (SuggestionBuilder<?> suggestion : suggestions) {
                 builder.addSuggestion(suggestion);
             }
-            SearchResponse actionGet = builder.execute().actionGet();
-            assertThat(Arrays.toString(actionGet.getShardFailures()), actionGet.getFailedShards(), equalTo(expectShardsFailed));
-            return actionGet.getSuggest();
+            if (randomBoolean()) {
+                SearchResponse actionGet = builder.execute().actionGet();
+                assertThat(Arrays.toString(actionGet.getShardFailures()), actionGet.getFailedShards(), equalTo(expectShardsFailed));
+                return actionGet.getSuggest();
+            } else {
+                return concurrentSearchSuggest(builder, expectShardsFailed);
+            }
         } else {
             SuggestRequestBuilder builder = client().prepareSuggest();
             if (suggestText != null) {
@@ -1287,12 +1304,138 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
                 builder.addSuggestion(suggestion);
             }
 
-            SuggestResponse actionGet = builder.execute().actionGet();
-            assertThat(Arrays.toString(actionGet.getShardFailures()), actionGet.getFailedShards(), equalTo(expectShardsFailed));
-            if (expectShardsFailed > 0) {
-                throw new SearchPhaseExecutionException("suggest", "Suggest execution failed", new ShardSearchFailure[0]);
+            if (randomBoolean()) {
+                SuggestResponse actionGet = builder.execute().actionGet();
+                assertThat(Arrays.toString(actionGet.getShardFailures()), actionGet.getFailedShards(), equalTo(expectShardsFailed));
+                if (expectShardsFailed > 0) {
+                    throw new SearchPhaseExecutionException("suggest", "Suggest execution failed", new ShardSearchFailure[0]);
+                }
+                return actionGet.getSuggest();
+            } else {
+                return concurrentSearchSuggest(builder, expectShardsFailed);
             }
-            return actionGet.getSuggest();
         }
+    }
+
+    private Suggest concurrentSearchSuggest(SuggestRequestBuilder builder, int expectShardsFailed) throws InterruptedException {
+        int numRequest = randomIntBetween(25, 30);
+        final CountDownLatch latch = new CountDownLatch(numRequest);
+        final CopyOnWriteArrayList<Object> responses = Lists.newCopyOnWriteArrayList();
+        for (int i = 0; i < numRequest; i++) {
+            final int finalI = i;
+            builder.execute(new ActionListener<SuggestResponse>() {
+                @Override
+                public void onResponse(SuggestResponse suggestResponse) {
+                    logger.info(" --> got result " + finalI);
+                    responses.add(suggestResponse);
+                    latch.countDown();
+
+                }
+
+                @Override
+                public void onFailure(Throwable e) {
+                    responses.add(e);
+                    latch.countDown();
+                }
+            });
+        }
+        logger.info(" --> waiting for results");
+        latch.await();
+        assertThat(responses.size(), equalTo(numRequest));
+
+        Suggest suggest = null;
+        int timedOut = 0;
+        for (Object response : responses) {
+            if (response instanceof SuggestResponse) {
+                SuggestResponse searchResponse = (SuggestResponse) response;
+                Suggest suggest1 = searchResponse.getSuggest();
+                if (suggest == null && suggest1.timedOut() == false) {
+                    suggest = suggest1;
+                } else if (suggest1.timedOut()) {
+                    timedOut++;
+                }
+                if (searchResponse.getFailedShards() != expectShardsFailed) {
+                    assertThat(suggest1.timedOut(), equalTo(true));
+                } else {
+                    assertThat(Arrays.toString(searchResponse.getShardFailures()), searchResponse.getFailedShards(), equalTo(expectShardsFailed));
+                }
+                if (expectShardsFailed > 0) {
+                    throw new SearchPhaseExecutionException("suggest", "Suggest execution failed", new ShardSearchFailure[0]);
+                }
+            } else {
+                Throwable t = (Throwable) response;
+                Throwable unwrap = ExceptionsHelper.unwrapCause(t);
+                if (unwrap instanceof ElasticsearchIllegalStateException) {
+                    throw (ElasticsearchIllegalStateException) unwrap;
+                } else {
+                    throw new ElasticsearchException("Suggest response exception", t);
+                }
+            }
+        }
+        if (timedOut == numRequest) {
+            throw new ElasticsearchException("All requests have timed out");
+        }
+        return suggest;
+    }
+
+    private Suggest concurrentSearchSuggest(SearchRequestBuilder builder, int expectShardsFailed) throws InterruptedException {
+        int numRequest = randomIntBetween(25, 30);
+        final CountDownLatch latch = new CountDownLatch(numRequest);
+        final CopyOnWriteArrayList<Object> responses = Lists.newCopyOnWriteArrayList();
+        for (int i = 0; i < numRequest; i++) {
+            final int finalI = i;
+            builder.execute(new ActionListener<SearchResponse>() {
+                @Override
+                public void onResponse(SearchResponse searchResponse) {
+                    logger.info(" --> got result " + finalI);
+                    responses.add(searchResponse);
+                    latch.countDown();
+
+                }
+
+                @Override
+                public void onFailure(Throwable e) {
+                    responses.add(e);
+                    latch.countDown();
+                }
+            });
+        }
+        logger.info(" --> waiting for results");
+        latch.await();
+        assertThat(responses.size(), equalTo(numRequest));
+
+        Suggest suggest = null;
+        int timedOut = 0;
+        for (Object response : responses) {
+            if (response instanceof SearchResponse) {
+                SearchResponse searchResponse = (SearchResponse) response;
+                Suggest suggest1 = searchResponse.getSuggest();
+                if (suggest == null && suggest1.timedOut() == false) {
+                    suggest = suggest1;
+                } else if (suggest1.timedOut()) {
+                    timedOut++;
+                }
+                if (searchResponse.getFailedShards() != expectShardsFailed) {
+                    assertThat(suggest1.timedOut(), equalTo(true));
+                } else {
+                    assertThat(Arrays.toString(searchResponse.getShardFailures()), searchResponse.getFailedShards(), equalTo(expectShardsFailed));
+                }
+                if (expectShardsFailed > 0) {
+                    throw new SearchPhaseExecutionException("suggest", "Suggest execution failed", new ShardSearchFailure[0]);
+                }
+            } else {
+                Throwable t = (Throwable) response;
+                Throwable unwrap = ExceptionsHelper.unwrapCause(t);
+                if (unwrap instanceof SearchPhaseExecutionException) {
+                    throw (SearchPhaseExecutionException) unwrap;
+                } else {
+                    throw new ElasticsearchException("Suggest response exception", t);
+                }
+            }
+        }
+        if (timedOut == numRequest) {
+            throw new ElasticsearchException("All requests have timed out");
+        }
+        return suggest;
     }
 }

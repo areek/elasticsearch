@@ -86,7 +86,16 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
     public Iterator<Suggestion<? extends Entry<? extends Option>>> iterator() {
         return suggestions.iterator();
     }
-    
+
+    public boolean timedOut() {
+        boolean timedOut = false;
+        for (Suggestion<? extends Entry<? extends Option>> suggestion : suggestions) {
+            if (suggestion.timedOut()) {
+                timedOut = true;
+            }
+        }
+        return timedOut;
+    }
     /**
      * The number of suggestions in this {@link Suggest} result
      */
@@ -198,6 +207,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
         public static final int TYPE = 0;
         protected String name;
         protected int size;
+        private boolean timedOut = false;
         protected final List<T> entries = new ArrayList<>(5);
 
         public Suggestion() {
@@ -214,6 +224,14 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
         
         public int getType() {
             return TYPE;
+        }
+
+        public void timedOut(boolean timedOut) {
+            this.timedOut = timedOut;
+        }
+
+        public boolean timedOut() {
+            return this.timedOut;
         }
 
         @Override
@@ -302,6 +320,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
         protected void innerReadFrom(StreamInput in) throws IOException {
             name = in.readString();
             size = in.readVInt();
+            timedOut = in.readBoolean();
         }
 
         @Override
@@ -316,6 +335,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
         public void innerWriteTo(StreamOutput out) throws IOException {
             out.writeString(name);
             out.writeVInt(size);
+            out.writeBoolean(timedOut);
         }
 
         @Override
