@@ -29,7 +29,10 @@ import org.elasticsearch.common.geo.builders.ShapeBuilder;
 /**
  * A static factory for simple "import static" usage.
  */
-public abstract class FilterBuilders {
+public final class FilterBuilders {
+
+    private FilterBuilders() {
+    }
 
     /**
      * A filter that matches all documents.
@@ -548,24 +551,24 @@ public abstract class FilterBuilders {
         return new IndicesFilterBuilder(filter, indices);
     }
 
+    /**
+     * Creates a {@link WrapperFilterBuilder} given a filter provided as a string
+     */
     public static WrapperFilterBuilder wrapperFilter(String filter) {
         return new WrapperFilterBuilder(filter);
     }
 
+    /**
+     * Creates a {@link WrapperFilterBuilder} given a filter provided as a bytes array
+     */
     public static WrapperFilterBuilder wrapperFilter(byte[] data, int offset, int length) {
         return new WrapperFilterBuilder(data, offset, length);
     }
 
     /**
-     * Constructs a bytes filter to generate a filter from a {@link BytesReference} source
-     *
-     * @param source The filter source
+     * Creates a {@link WrapperFilterBuilder} given a filter provided as a {@link BytesReference}
      */
-    public static BytesFilterBuilder bytesFilter(BytesReference source) {
-        return new BytesFilterBuilder(source);
-    }
-
-    private FilterBuilders() {
-
+    public static WrapperFilterBuilder wrapperFilter(BytesReference source) {
+        return new WrapperFilterBuilder(source);
     }
 }

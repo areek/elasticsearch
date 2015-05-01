@@ -116,6 +116,10 @@ Some query builders have been removed or renamed:
 * `filtered(...)` removed. Use `filteredQuery(...)` instead.
 * `inQuery(...)` removed.
 
+`BytesFilterBuilder` and the corresponding `FilterBuilders#bytesFilter` method have been
+removed in favour of the existing `WrapperFilterBuilder`, which has now an additional
+constructor that accepts a `BytesReference` as argument.
+
 === Aggregations
 
 The `date_histogram` aggregation now returns a `Histogram` object in the response, and the `DateHistogram` class has been removed. Similarly
