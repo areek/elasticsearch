@@ -1238,6 +1238,10 @@ public class SuggestSearchTests extends ElasticsearchIntegrationTest {
         searchSuggest = searchSuggest("united states house of representatives elections in washington 2006", phraseSuggestWithParams);
         assertSuggestionSize(searchSuggest, 0, 2, "title");
 
+        phraseSuggestWithParams = suggest.collateQuery(null).collateQuery(collateWithParams).collateParams(params);
+        searchSuggest = searchSuggest("united states house of representatives elections in washington 2006", phraseSuggestWithParams);
+        assertSuggestionSize(searchSuggest, 0, 2, "title");
+
         //collate request defining both query/filter should fail
         PhraseSuggestionBuilder phraseSuggestWithFilterAndQuery = suggest.collateFilter(filterStringAsFilter).collateQuery(filterString);
         try {

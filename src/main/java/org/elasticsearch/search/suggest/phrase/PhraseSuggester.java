@@ -37,7 +37,10 @@ import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.text.StringText;
 import org.elasticsearch.common.text.Text;
-import org.elasticsearch.index.query.FilterBuilders;
+import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentFactory;
+import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.index.query.BaseFilterBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.script.CompiledScript;
 import org.elasticsearch.script.ExecutableScript;
@@ -173,7 +176,7 @@ public final class PhraseSuggester extends Suggester<PhraseSuggestionContext> {
             if (isFilter) {
                 req = client.prepareSearch()
                         .setPreference(suggestions.getPreference())
-                        .setQuery(QueryBuilders.constantScoreQuery(FilterBuilders.wrapperFilter(querySource)))
+                        .setQuery(QueryBuilders.constantScoreQuery(new BytesFilterBuilder(querySource)))
                         .setSize(0)
                         .setTerminateAfter(1);
             } else {
@@ -202,6 +205,25 @@ public final class PhraseSuggester extends Suggester<PhraseSuggestionContext> {
             return resp.getHits().totalHits() > 0;
         } else {
             throw new ElasticsearchException("Collate request failed: " + item.getFailureMessage());
+        }
+    }
+
+    private static class BytesFilterBuilder extends BaseFilterBuilder {
+
+        private final BytesReference source;
+
+        public BytesFilterBuilder(BytesReference source) {
+            this.source = source;
+        }
+
+        @Override
+        protected void doXContent(XContentBuilder builder, Params params) throws IOException {
+            try (XContentParser parser = XContentFactory.xContent(source).createParser(source)) {
+                // unwrap the first layer of json dictionary
+                parser.nextToken();
+                parser.nextToken();
+                builder.copyCurrentStructure(parser);
+            }
         }
     }
 
