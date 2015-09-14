@@ -32,7 +32,7 @@ import org.elasticsearch.cluster.routing.allocation.RoutingExplanations;
 import org.elasticsearch.cluster.routing.allocation.command.AllocateAllocationCommand;
 import org.elasticsearch.cluster.routing.allocation.command.MoveAllocationCommand;
 import org.elasticsearch.cluster.routing.allocation.decider.Decision;
-import org.elasticsearch.cluster.routing.allocation.decider.DisableAllocationDecider;
+import org.elasticsearch.cluster.routing.allocation.decider.EnableAllocationDecider;
 import org.elasticsearch.cluster.routing.allocation.decider.EnableAllocationDecider.Allocation;
 import org.elasticsearch.cluster.routing.allocation.decider.ThrottlingAllocationDecider;
 import org.elasticsearch.common.Priority;
@@ -71,8 +71,8 @@ public class ClusterRerouteIT extends ESIntegTestCase {
     @Test
     public void rerouteWithCommands_disableAllocationSettings() throws Exception {
         Settings commonSettings = settingsBuilder()
-                .put(DisableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_DISABLE_NEW_ALLOCATION, true)
-                .put(DisableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_DISABLE_ALLOCATION, true)
+                .put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE, "none")
+                .put(EnableAllocationDecider.CLUSTER_ROUTING_REBALANCE_ENABLE, "none")
                 .build();
         rerouteWithCommands(commonSettings);
     }
@@ -149,8 +149,8 @@ public class ClusterRerouteIT extends ESIntegTestCase {
     @Test
     public void rerouteWithAllocateLocalGateway_disableAllocationSettings() throws Exception {
         Settings commonSettings = settingsBuilder()
-                .put(DisableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_DISABLE_NEW_ALLOCATION, true)
-                .put(DisableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_DISABLE_ALLOCATION, true)
+                .put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE, "none")
+                .put(EnableAllocationDecider.CLUSTER_ROUTING_REBALANCE_ENABLE, "none")
                 .build();
         rerouteWithAllocateLocalGateway(commonSettings);
     }
@@ -166,7 +166,6 @@ public class ClusterRerouteIT extends ESIntegTestCase {
     @Test
     public void testDelayWithALargeAmountOfShards() throws Exception {
         Settings commonSettings = settingsBuilder()
-                .put("gateway.type", "local")
                 .put(ThrottlingAllocationDecider.CLUSTER_ROUTING_ALLOCATION_CONCURRENT_RECOVERIES, 1)
                 .build();
         logger.info("--> starting 4 nodes");

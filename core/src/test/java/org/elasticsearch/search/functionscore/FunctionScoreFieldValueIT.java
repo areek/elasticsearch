@@ -21,6 +21,7 @@ package org.elasticsearch.search.functionscore;
 
 import org.elasticsearch.action.search.SearchPhaseExecutionException;
 import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.lucene.search.function.FieldValueFactorFunction;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.junit.Test;
@@ -104,6 +105,15 @@ public class FunctionScoreFieldValueIT extends ESIntegTestCase {
                 .get();
         assertOrderedSearchHits(response, "1", "2", "3");
 
+        // field is not mapped but we're defaulting it to 100 so all documents should have the same score
+        response = client().prepareSearch("test")
+                .setExplain(randomBoolean())
+                .setQuery(functionScoreQuery(matchAllQuery(),
+                        fieldValueFactorFunction("notmapped").modifier(FieldValueFactorFunction.Modifier.RECIPROCAL).missing(100)))
+                .get();
+        assertEquals(response.getHits().getAt(0).score(), response.getHits().getAt(2).score(), 0);
+
+
         // n divided by 0 is infinity, which should provoke an exception.
         try {
             response = client().prepareSearch("test")
@@ -137,8 +147,8 @@ public class FunctionScoreFieldValueIT extends ESIntegTestCase {
             "  }" +
             "}";
           response = client().prepareSearch("test")
-          .setSource(querySource)
-          .get();
+          .setSource(new BytesArray(querySource))
+                  .get();
           assertFailures(response);
         } catch (SearchPhaseExecutionException e) {
           // This is fine, the query will throw an exception if executed

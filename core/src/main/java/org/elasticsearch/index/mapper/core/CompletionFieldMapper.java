@@ -18,8 +18,6 @@
  */
 package org.elasticsearch.index.mapper.core;
 
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import org.apache.lucene.codecs.PostingsFormat;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.search.suggest.xdocument.*;
@@ -40,7 +38,6 @@ import org.elasticsearch.search.suggest.completion.context.ContextMappings;
 import org.elasticsearch.search.suggest.completion.context.ContextMappingsParser;
 
 import java.io.IOException;
-
 import java.util.*;
 
 import static org.elasticsearch.index.mapper.MapperBuilders.completionField;
@@ -98,8 +95,8 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
         public static final String CONTENT_FIELD_NAME_CONTEXTS = "contexts";
     }
 
-    public static final Set<String> ALLOWED_CONTENT_FIELD_NAMES = Sets.newHashSet(Fields.CONTENT_FIELD_NAME_INPUT,
-            Fields.CONTENT_FIELD_NAME_WEIGHT, Fields.CONTENT_FIELD_NAME_CONTEXTS);
+    public static final Set<String> ALLOWED_CONTENT_FIELD_NAMES = new HashSet<>(Arrays.asList(Fields.CONTENT_FIELD_NAME_INPUT,
+            Fields.CONTENT_FIELD_NAME_WEIGHT, Fields.CONTENT_FIELD_NAME_CONTEXTS));
 
     public static class TypeParser implements Mapper.TypeParser {
 
@@ -238,6 +235,23 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
         }
 
         @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof CompletionFieldType)) return false;
+            if (!super.equals(o)) return false;
+            CompletionFieldType fieldType = (CompletionFieldType) o;
+            return (!hasContextMappings() && !fieldType.hasContextMappings()) || contextMappings.equals(fieldType.contextMappings);
+        }
+
+        @Override
+        public int hashCode() {
+            final int prime = 31;
+            int result = super.hashCode();
+            result = prime * result + (hasContextMappings() ? contextMappings.hashCode() : 0);
+            return result;
+        }
+
+        @Override
         public CompletionFieldType clone() {
             return new CompletionFieldType(this);
         }
@@ -255,15 +269,15 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
             CompletionAnalyzer otherAnalyzer = (CompletionAnalyzer) other.indexAnalyzer().analyzer();
 
             if (analyzer.preservePositionIncrements() != otherAnalyzer.preservePositionIncrements()) {
-                conflicts.add("mapper [" + names().fullName() + "] has different 'preserve_position_increments' values");
+                conflicts.add("mapper [" + names().fullName() + "] has different [preserve_position_increments] values");
             }
             if (analyzer.preserveSep() != otherAnalyzer.preserveSep()) {
-                conflicts.add("mapper [" + names().fullName() + "] has different 'preserve_separators' values");
+                conflicts.add("mapper [" + names().fullName() + "] has different [preserve_separators] values");
             }
             if (hasContextMappings() != other.hasContextMappings()) {
-                conflicts.add("mapper [" + names().fullName() + "] has different context mapping");
+                conflicts.add("mapper [" + names().fullName() + "] has different [context_mapping] values");
             } else if (hasContextMappings() && contextMappings.equals(other.contextMappings) == false) {
-                conflicts.add("mapper [" + names().fullName() + "] has different 'context_mappings' values");
+                conflicts.add("mapper [" + names().fullName() + "] has different [context_mapping] values");
             }
         }
 
@@ -515,7 +529,7 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
     }
 
     private static class CompletionInputs implements Iterable<Map.Entry<String, CompletionInputs.CompletionInputMetaData>> {
-        Map<String, CompletionInputMetaData> inputs = Maps.newHashMapWithExpectedSize(4);
+        Map<String, CompletionInputMetaData> inputs = new HashMap<>(4);
 
         static class CompletionInputMetaData {
             public final Map<String, Set<CharSequence>> contexts;

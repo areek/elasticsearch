@@ -19,7 +19,6 @@
 
 package org.elasticsearch.discovery.local;
 
-import com.google.common.base.Objects;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.*;
 import org.elasticsearch.cluster.block.ClusterBlocks;
@@ -27,7 +26,6 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodeService;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.RoutingService;
-import org.elasticsearch.cluster.routing.allocation.AllocationService;
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
 import org.elasticsearch.common.inject.Inject;
@@ -48,7 +46,6 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static com.google.common.collect.Sets.newHashSet;
 import static org.elasticsearch.cluster.ClusterState.Builder;
 
 /**
@@ -227,7 +224,7 @@ public class LocalDiscovery extends AbstractLifecycleComponent<Discovery> implem
                     firstMaster.master = true;
                 }
 
-                final Set<String> newMembers = newHashSet();
+                final Set<String> newMembers = new HashSet<>();
                 for (LocalDiscovery discovery : clusterGroup.members()) {
                     newMembers.add(discovery.localNode.id());
                 }
@@ -333,9 +330,9 @@ public class LocalDiscovery extends AbstractLifecycleComponent<Discovery> implem
                         }
                         try {
                             newNodeSpecificClusterState = discovery.lastProcessedClusterState.readDiffFrom(StreamInput.wrap(clusterStateDiffBytes)).apply(discovery.lastProcessedClusterState);
-                            logger.debug("sending diff cluster state version with size {} to [{}]", clusterStateDiffBytes.length, discovery.localNode.getName());
+                            logger.trace("sending diff cluster state version [{}] with size {} to [{}]", clusterState.version(), clusterStateDiffBytes.length, discovery.localNode.getName());
                         } catch (IncompatibleClusterStateVersionException ex) {
-                            logger.warn("incompatible cluster state version - resending complete cluster state", ex);
+                            logger.warn("incompatible cluster state version [{}] - resending complete cluster state", ex, clusterState.version());
                         }
                     }
                     if (newNodeSpecificClusterState == null) {
@@ -357,7 +354,7 @@ public class LocalDiscovery extends AbstractLifecycleComponent<Discovery> implem
                     discovery.clusterService.submitStateUpdateTask("local-disco-receive(from master)", new ProcessedClusterStateNonMasterUpdateTask() {
                         @Override
                         public ClusterState execute(ClusterState currentState) {
-                            if (nodeSpecificClusterState.version() < currentState.version() && Objects.equal(nodeSpecificClusterState.nodes().masterNodeId(), currentState.nodes().masterNodeId())) {
+                            if (currentState.supersedes(nodeSpecificClusterState)) {
                                 return currentState;
                             }
 

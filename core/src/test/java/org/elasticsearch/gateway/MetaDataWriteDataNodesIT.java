@@ -20,7 +20,6 @@
 package org.elasticsearch.gateway;
 
 import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
-import com.google.common.base.Predicate;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
 import org.elasticsearch.action.admin.indices.mapping.get.GetMappingsResponse;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
@@ -61,8 +60,8 @@ public class MetaDataWriteDataNodesIT extends ESIntegTestCase {
     public void testMetaIsRemovedIfAllShardsFromIndexRemoved() throws Exception {
         // this test checks that the index state is removed from a data only node once all shards have been allocated away from it
         String masterNode = internalCluster().startMasterOnlyNode(Settings.EMPTY);
-        Future<String> nodeName1 = internalCluster().startDataOnlyNodeAsync();
-        Future<String> nodeName2 = internalCluster().startDataOnlyNodeAsync();
+        InternalTestCluster.Async<String> nodeName1 = internalCluster().startDataOnlyNodeAsync();
+        InternalTestCluster.Async<String> nodeName2 = internalCluster().startDataOnlyNodeAsync();
         String node1 = nodeName1.get();
         String node2 = nodeName2.get();
 
@@ -160,18 +159,15 @@ public class MetaDataWriteDataNodesIT extends ESIntegTestCase {
 
 
     private void assertMetaState(final String nodeName, final String indexName, final boolean shouldBe) throws Exception {
-        awaitBusy(new Predicate<Object>() {
-            @Override
-            public boolean apply(Object o) {
-                logger.info("checking if meta state exists...");
-                try {
-                    return shouldBe == metaStateExists(nodeName, indexName);
-                } catch (Throwable t) {
-                    logger.info("failed to load meta state", t);
-                    // TODO: loading of meta state fails rarely if the state is deleted while we try to load it
-                    // this here is a hack, would be much better to use for example a WatchService
-                    return false;
-                }
+        awaitBusy(() -> {
+            logger.info("checking if meta state exists...");
+            try {
+                return shouldBe == metaStateExists(nodeName, indexName);
+            } catch (Throwable t) {
+                logger.info("failed to load meta state", t);
+                // TODO: loading of meta state fails rarely if the state is deleted while we try to load it
+                // this here is a hack, would be much better to use for example a WatchService
+                return false;
             }
         });
         boolean inMetaSate = metaStateExists(nodeName, indexName);

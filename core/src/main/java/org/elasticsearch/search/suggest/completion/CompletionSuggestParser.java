@@ -19,6 +19,7 @@
 package org.elasticsearch.search.suggest.completion;
 
 import org.elasticsearch.ElasticsearchException;
+import org.elasticsearch.common.HasContextAndHeaders;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.unit.Fuzziness;
@@ -87,11 +88,11 @@ public class CompletionSuggestParser implements SuggestContextParser {
 
     @Override
     public SuggestionSearchContext.SuggestionContext parse(XContentParser parser, MapperService mapperService,
-                                                           IndexQueryParserService queryParserService) throws IOException {
+            IndexQueryParserService queryParserService, HasContextAndHeaders headersContext) throws IOException {
         XContentParser.Token token;
         String fieldName = null;
         CompletionSuggestionContext suggestion = new CompletionSuggestionContext(completionSuggester);
-        
+
         XContentParser contextParser = null;
         CompletionSuggestionBuilder.FuzzyOptionsBuilder fuzzyOptions = null;
         CompletionSuggestionBuilder.RegexOptionsBuilder regexOptions = null;
@@ -184,7 +185,6 @@ public class CompletionSuggestParser implements SuggestContextParser {
             // TODO: pass a query builder or the query itself?
             // now we do it in CompletionSuggester#toQuery(CompletionSuggestionContext)
             return suggestion;
-
         } else if (mappedFieldType instanceof OldCompletionFieldMapper.CompletionFieldType) {
             org.elasticsearch.search.suggest.completion.old.CompletionSuggestionContext oldSuggestionContext =
                     new org.elasticsearch.search.suggest.completion.old.CompletionSuggestionContext(oldCompletionSuggester);

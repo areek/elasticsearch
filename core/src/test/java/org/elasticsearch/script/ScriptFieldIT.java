@@ -30,6 +30,7 @@ import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
 import org.elasticsearch.test.ESIntegTestCase.Scope;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
@@ -40,8 +41,8 @@ import static org.hamcrest.Matchers.equalTo;
 public class ScriptFieldIT extends ESIntegTestCase {
 
     @Override
-    protected Settings nodeSettings(int nodeOrdinal) {
-        return settingsBuilder().put(super.nodeSettings(nodeOrdinal)).put("plugin.types", CustomScriptPlugin.class.getName()).build();
+    protected Collection<Class<? extends Plugin>> nodePlugins() {
+        return pluginList(CustomScriptPlugin.class);
     }
 
     static int[] intArray = { Integer.MAX_VALUE, Integer.MIN_VALUE, 3 };
@@ -76,7 +77,7 @@ public class ScriptFieldIT extends ESIntegTestCase {
         }
     }
 
-    static class IntArrayScriptFactory implements NativeScriptFactory {
+    public static class IntArrayScriptFactory implements NativeScriptFactory {
         @Override
         public ExecutableScript newScript(@Nullable Map<String, Object> params) {
             return new IntScript();
@@ -95,7 +96,7 @@ public class ScriptFieldIT extends ESIntegTestCase {
         }
     }
 
-    static class LongArrayScriptFactory implements NativeScriptFactory {
+    public static class LongArrayScriptFactory implements NativeScriptFactory {
         @Override
         public ExecutableScript newScript(@Nullable Map<String, Object> params) {
             return new LongScript();
@@ -114,7 +115,7 @@ public class ScriptFieldIT extends ESIntegTestCase {
         }
     }
 
-    static class FloatArrayScriptFactory implements NativeScriptFactory {
+    public static class FloatArrayScriptFactory implements NativeScriptFactory {
         @Override
         public ExecutableScript newScript(@Nullable Map<String, Object> params) {
             return new FloatScript();
@@ -133,7 +134,7 @@ public class ScriptFieldIT extends ESIntegTestCase {
         }
     }
 
-    static class DoubleArrayScriptFactory implements NativeScriptFactory {
+    public static class DoubleArrayScriptFactory implements NativeScriptFactory {
         @Override
         public ExecutableScript newScript(@Nullable Map<String, Object> params) {
             return new DoubleScript();

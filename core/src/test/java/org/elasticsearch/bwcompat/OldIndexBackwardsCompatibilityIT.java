@@ -19,9 +19,6 @@
 
 package org.elasticsearch.bwcompat;
 
-import com.google.common.base.Predicate;
-import com.google.common.util.concurrent.ListenableFuture;
-
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.TestUtil;
@@ -51,6 +48,7 @@ import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.sort.SortOrder;
 import org.elasticsearch.test.ESIntegTestCase;
+import org.elasticsearch.test.InternalTestCluster;
 import org.elasticsearch.test.VersionUtils;
 import org.elasticsearch.test.hamcrest.ElasticsearchAssertions;
 import org.hamcrest.Matchers;
@@ -73,6 +71,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.Future;
 
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailures;
@@ -99,8 +98,7 @@ public class OldIndexBackwardsCompatibilityIT extends ESIntegTestCase {
 
     private List<String> loadIndexesList(String prefix) throws IOException {
         List<String> indexes = new ArrayList<>();
-        Path dir = getDataPath(".");
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, prefix + "-*.zip")) {
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(getBwcIndicesPath(), prefix + "-*.zip")) {
             for (Path path : stream) {
                 indexes.add(path.getFileName().toString());
             }
@@ -124,20 +122,20 @@ public class OldIndexBackwardsCompatibilityIT extends ESIntegTestCase {
     }
 
     void setupCluster() throws Exception {
-        ListenableFuture<List<String>> replicas = internalCluster().startNodesAsync(1); // for replicas
+        InternalTestCluster.Async<List<String>> replicas = internalCluster().startNodesAsync(1); // for replicas
 
         Path baseTempDir = createTempDir();
         // start single data path node
         Settings.Builder nodeSettings = Settings.builder()
             .put("path.data", baseTempDir.resolve("single-path").toAbsolutePath())
             .put("node.master", false); // workaround for dangling index loading issue when node is master
-        ListenableFuture<String> singleDataPathNode = internalCluster().startNodeAsync(nodeSettings.build());
+        InternalTestCluster.Async<String> singleDataPathNode = internalCluster().startNodeAsync(nodeSettings.build());
 
         // start multi data path node
         nodeSettings = Settings.builder()
             .put("path.data", baseTempDir.resolve("multi-path1").toAbsolutePath() + "," + baseTempDir.resolve("multi-path2").toAbsolutePath())
             .put("node.master", false); // workaround for dangling index loading issue when node is master
-        ListenableFuture<String> multiDataPathNode = internalCluster().startNodeAsync(nodeSettings.build());
+        InternalTestCluster.Async<String> multiDataPathNode = internalCluster().startNodeAsync(nodeSettings.build());
 
         // find single data path dir
         Path[] nodePaths = internalCluster().getInstance(NodeEnvironment.class, singleDataPathNode.get()).nodeDataPaths();
@@ -167,7 +165,7 @@ public class OldIndexBackwardsCompatibilityIT extends ESIntegTestCase {
         String indexName = indexFile.replace(".zip", "").toLowerCase(Locale.ROOT).replace("unsupported-", "index-");
 
         // decompress the index
-        Path backwardsIndex = getDataPath(indexFile);
+        Path backwardsIndex = getBwcIndicesPath().resolve(indexFile);
         try (InputStream stream = Files.newInputStream(backwardsIndex)) {
             TestUtil.unzip(stream, unzipDir);
         }
@@ -292,13 +290,12 @@ public class OldIndexBackwardsCompatibilityIT extends ESIntegTestCase {
      * Waits for the index to show up in the cluster state in closed state
      */
     void ensureClosed(final String index) throws InterruptedException {
-        assertTrue(awaitBusy(new Predicate<Object>() {
-            @Override
-            public boolean apply(Object o) {
-                ClusterState state = client().admin().cluster().prepareState().get().getState();
-                return state.metaData().hasIndex(index) && state.metaData().index(index).getState() == IndexMetaData.State.CLOSE;
-            }
-        }));
+        assertTrue(awaitBusy(() -> {
+                            ClusterState state = client().admin().cluster().prepareState().get().getState();
+                            return state.metaData().hasIndex(index) && state.metaData().index(index).getState() == IndexMetaData.State.CLOSE;
+                        }
+                )
+        );
     }
 
     /**

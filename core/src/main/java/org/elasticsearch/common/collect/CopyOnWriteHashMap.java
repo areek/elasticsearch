@@ -20,12 +20,25 @@
 package org.elasticsearch.common.collect;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
+import com.google.common.base.Supplier;
+import com.google.common.base.Suppliers;
 import com.google.common.collect.UnmodifiableIterator;
 import org.apache.lucene.util.mutable.MutableValueInt;
 
 import java.lang.reflect.Array;
-import java.util.*;
+import java.util.AbstractMap;
+import java.util.AbstractSet;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * An immutable map whose writes result in a new copy of the map to be created.
@@ -128,7 +141,7 @@ public final class CopyOnWriteHashMap<K, V> extends AbstractMap<K, V> {
         @Override
         void visit(Deque<Map.Entry<K, V>> entries, Deque<Node<K, V>> nodes) {
             for (int i = 0; i < keys.length; ++i) {
-                entries.add(Maps.immutableEntry(keys[i], values[i]));
+                entries.add(new AbstractMap.SimpleImmutableEntry<>(keys[i], values[i]));
             }
         }
 
@@ -278,7 +291,7 @@ public final class CopyOnWriteHashMap<K, V> extends AbstractMap<K, V> {
                 } else {
                     @SuppressWarnings("unchecked")
                     final V value = (V) sub;
-                    entries.add(Maps.immutableEntry(keys[i], value));
+                    entries.add(new AbstractMap.SimpleImmutableEntry<>(keys[i], value));
                 }
             }
         }
@@ -506,12 +519,16 @@ public final class CopyOnWriteHashMap<K, V> extends AbstractMap<K, V> {
         return copyAndPutAll(other.entrySet());
     }
 
-    <K1 extends K, V1 extends V> CopyOnWriteHashMap<K, V> copyAndPutAll(Collection<Map.Entry<K1, V1>> entries) {
+    public <K1 extends K, V1 extends V> CopyOnWriteHashMap<K, V> copyAndPutAll(Iterable<Entry<K1, V1>> entries) {
         CopyOnWriteHashMap<K, V> result = this;
-        for (Map.Entry<K1, V1> entry : entries) {
+        for (Entry<K1, V1> entry : entries) {
             result = result.copyAndPut(entry.getKey(), entry.getValue());
         }
         return result;
+    }
+
+    public <K1 extends K, V1 extends V> CopyOnWriteHashMap<K, V> copyAndPutAll(Stream<Entry<K1, V1>> entries) {
+        return copyAndPutAll(entries::iterator);
     }
 
     /**

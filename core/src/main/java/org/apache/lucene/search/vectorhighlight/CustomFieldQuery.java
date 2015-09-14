@@ -58,28 +58,28 @@ public class CustomFieldQuery extends FieldQuery {
     }
 
     @Override
-    void flatten(Query sourceQuery, IndexReader reader, Collection<Query> flatQueries) throws IOException {
+    void flatten(Query sourceQuery, IndexReader reader, Collection<Query> flatQueries, float boost) throws IOException {
         if (sourceQuery instanceof SpanTermQuery) {
-            super.flatten(new TermQuery(((SpanTermQuery) sourceQuery).getTerm()), reader, flatQueries);
+            super.flatten(new TermQuery(((SpanTermQuery) sourceQuery).getTerm()), reader, flatQueries, boost);
         } else if (sourceQuery instanceof ConstantScoreQuery) {
-            flatten(((ConstantScoreQuery) sourceQuery).getQuery(), reader, flatQueries);
+            flatten(((ConstantScoreQuery) sourceQuery).getQuery(), reader, flatQueries, boost);
         } else if (sourceQuery instanceof FunctionScoreQuery) {
-            flatten(((FunctionScoreQuery) sourceQuery).getSubQuery(), reader, flatQueries);
+            flatten(((FunctionScoreQuery) sourceQuery).getSubQuery(), reader, flatQueries, boost);
         } else if (sourceQuery instanceof FilteredQuery) {
-            flatten(((FilteredQuery) sourceQuery).getQuery(), reader, flatQueries);
+            flatten(((FilteredQuery) sourceQuery).getQuery(), reader, flatQueries, boost);
             flatten(((FilteredQuery) sourceQuery).getFilter(), reader, flatQueries);
         } else if (sourceQuery instanceof MultiPhrasePrefixQuery) {
-            flatten(sourceQuery.rewrite(reader), reader, flatQueries);
+            flatten(sourceQuery.rewrite(reader), reader, flatQueries, boost);
         } else if (sourceQuery instanceof FiltersFunctionScoreQuery) {
-            flatten(((FiltersFunctionScoreQuery) sourceQuery).getSubQuery(), reader, flatQueries);
+            flatten(((FiltersFunctionScoreQuery) sourceQuery).getSubQuery(), reader, flatQueries, boost);
         } else if (sourceQuery instanceof MultiPhraseQuery) {
             MultiPhraseQuery q = ((MultiPhraseQuery) sourceQuery);
             convertMultiPhraseQuery(0, new int[q.getTermArrays().size()], q, q.getTermArrays(), q.getPositions(), reader, flatQueries);
         } else if (sourceQuery instanceof BlendedTermQuery) {
             final BlendedTermQuery blendedTermQuery = (BlendedTermQuery) sourceQuery;
-            flatten(blendedTermQuery.rewrite(reader), reader, flatQueries);
+            flatten(blendedTermQuery.rewrite(reader), reader, flatQueries, boost);
         } else {
-            super.flatten(sourceQuery, reader, flatQueries);
+            super.flatten(sourceQuery, reader, flatQueries, boost);
         }
     }
     
@@ -93,7 +93,7 @@ public class CustomFieldQuery extends FieldQuery {
             if (numTerms > 16) {
                 for (Term[] currentPosTerm : terms) {
                     for (Term term : currentPosTerm) {
-                        super.flatten(new TermQuery(term), reader, flatQueries);    
+                        super.flatten(new TermQuery(term), reader, flatQueries, orig.getBoost());    
                     }
                 }
                 return;
@@ -104,13 +104,14 @@ public class CustomFieldQuery extends FieldQuery {
          * It seems expensive but most queries will pretty small.
          */
         if (currentPos == terms.size()) {
-            PhraseQuery query = new PhraseQuery();
-            query.setBoost(orig.getBoost());
-            query.setSlop(orig.getSlop());
+            PhraseQuery.Builder queryBuilder = new PhraseQuery.Builder();
+            queryBuilder.setSlop(orig.getSlop());
             for (int i = 0; i < termsIdx.length; i++) {
-                query.add(terms.get(i)[termsIdx[i]], pos[i]);
+                queryBuilder.add(terms.get(i)[termsIdx[i]], pos[i]);
             }
-            this.flatten(query, reader, flatQueries);
+            PhraseQuery query = queryBuilder.build();
+            query.setBoost(orig.getBoost());
+            this.flatten(query, reader, flatQueries, orig.getBoost());
         } else {
             Term[] t = terms.get(currentPos);
             for (int i = 0; i < t.length; i++) {
@@ -126,7 +127,7 @@ public class CustomFieldQuery extends FieldQuery {
             return;
         }
         if (sourceFilter instanceof QueryWrapperFilter) {
-            flatten(((QueryWrapperFilter) sourceFilter).getQuery(), reader, flatQueries);
+            flatten(((QueryWrapperFilter) sourceFilter).getQuery(), reader, flatQueries, 1.0F);
         }
     }
 }

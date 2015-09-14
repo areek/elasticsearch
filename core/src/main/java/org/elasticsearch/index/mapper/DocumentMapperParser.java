@@ -20,9 +20,6 @@
 package org.elasticsearch.index.mapper;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSortedMap;
-import com.google.common.collect.Maps;
-
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.ParseFieldMatcher;
@@ -50,10 +47,7 @@ import org.elasticsearch.index.similarity.SimilarityLookupService;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptService;
 
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.elasticsearch.index.mapper.MapperBuilders.doc;
 
@@ -74,7 +68,7 @@ public class DocumentMapperParser {
 
     private volatile ImmutableMap<String, Mapper.TypeParser> typeParsers;
     private volatile ImmutableMap<String, Mapper.TypeParser> rootTypeParsers;
-    private volatile ImmutableMap<String, Mapper.TypeParser> additionalRootMappers;
+    private volatile SortedMap<String, Mapper.TypeParser> additionalRootMappers;
 
     public DocumentMapperParser(@IndexSettings Settings indexSettings, MapperService mapperService, AnalysisService analysisService,
                                 SimilarityLookupService similarityLookupService, ScriptService scriptService) {
@@ -123,7 +117,7 @@ public class DocumentMapperParser {
                 .put(IdFieldMapper.NAME, new IdFieldMapper.TypeParser())
                 .put(FieldNamesFieldMapper.NAME, new FieldNamesFieldMapper.TypeParser())
                 .immutableMap();
-        additionalRootMappers = ImmutableSortedMap.<String, Mapper.TypeParser>of();
+        additionalRootMappers = Collections.emptySortedMap();
         indexVersionCreated = Version.indexCreated(indexSettings);
     }
 
@@ -140,15 +134,15 @@ public class DocumentMapperParser {
             rootTypeParsers = new MapBuilder<>(rootTypeParsers)
                     .put(type, typeParser)
                     .immutableMap();
-            additionalRootMappers = ImmutableSortedMap.<String, Mapper.TypeParser>naturalOrder()
-                    .putAll(additionalRootMappers)
-                    .put(type, typeParser)
-                    .build();
+            SortedMap<String, Mapper.TypeParser> newAdditionalRootMappers = new TreeMap<>();
+            newAdditionalRootMappers.putAll(additionalRootMappers);
+            newAdditionalRootMappers.put(type, typeParser);
+            additionalRootMappers = Collections.unmodifiableSortedMap(newAdditionalRootMappers);
         }
     }
 
-    public Mapper.TypeParser.ParserContext parserContext() {
-        return new Mapper.TypeParser.ParserContext(analysisService, similarityLookupService, mapperService, typeParsers, indexVersionCreated, parseFieldMatcher);
+    public Mapper.TypeParser.ParserContext parserContext(String type) {
+        return new Mapper.TypeParser.ParserContext(type, analysisService, similarityLookupService, mapperService, typeParsers, indexVersionCreated, parseFieldMatcher);
     }
 
     public DocumentMapper parse(String source) throws MapperParsingException {
@@ -168,7 +162,7 @@ public class DocumentMapperParser {
             mapping = t.v2();
         }
         if (mapping == null) {
-            mapping = Maps.newHashMap();
+            mapping = new HashMap<>();
         }
         return parse(type, mapping, defaultSource);
     }
@@ -187,7 +181,7 @@ public class DocumentMapperParser {
             mapping = t.v2();
         }
         if (mapping == null) {
-            mapping = Maps.newHashMap();
+            mapping = new HashMap<>();
         }
         return parse(type, mapping, defaultSource);
     }
@@ -206,7 +200,7 @@ public class DocumentMapperParser {
         }
 
 
-        Mapper.TypeParser.ParserContext parserContext = parserContext();
+        Mapper.TypeParser.ParserContext parserContext = parserContext(type);
         // parse RootObjectMapper
         DocumentMapper.Builder docBuilder = doc(indexSettings, (RootObjectMapper.Builder) rootObjectTypeParser.parse(type, mapping, parserContext), mapperService);
         // Add default mapping for the plugged-in meta mappers

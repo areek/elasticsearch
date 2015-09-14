@@ -20,10 +20,10 @@ package org.elasticsearch.search.suggest;
 
 import com.carrotsearch.randomizedtesting.generators.RandomStrings;
 
+import org.apache.lucene.util.GeoHashUtils;
 import org.apache.lucene.util.LuceneTestCase.SuppressCodecs;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.suggest.SuggestResponse;
-import org.elasticsearch.common.geo.GeoHashUtils;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -419,7 +419,7 @@ public class ContextCompletionSuggestSearchIT extends ESIntegTestCase {
                     .field("input", "suggestion" + i)
                     .field("weight", i + 1)
                     .startObject("contexts")
-                    .field("geo", GeoHashUtils.encode(1.2, 1.3))
+                    .field("geo", GeoHashUtils.stringEncode(1.2, 1.3))
                     .endObject()
                     .endObject().endObject();
             indexRequestBuilders.add(client().prepareIndex(INDEX, TYPE, "" + i)
@@ -485,6 +485,7 @@ public class ContextCompletionSuggestSearchIT extends ESIntegTestCase {
                     .setSource(source));
         }
         indexRandom(true, indexRequestBuilders);
+        client().admin().indices().prepareOptimize(INDEX).setMaxNumSegments(1).get();
         CompletionSuggestionBuilder prefix = SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("sugg");
         assertSuggestions("foo", prefix, "suggestion9", "suggestion8", "suggestion7", "suggestion6", "suggestion5");
 

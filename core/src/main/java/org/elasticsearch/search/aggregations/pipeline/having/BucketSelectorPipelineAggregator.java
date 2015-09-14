@@ -19,7 +19,6 @@
 
 package org.elasticsearch.search.aggregations.pipeline.having;
 
-import com.google.common.base.Function;
 
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
@@ -28,7 +27,6 @@ import org.elasticsearch.script.ExecutableScript;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptContext;
 import org.elasticsearch.script.expression.ExpressionScriptEngineService;
-import org.elasticsearch.search.aggregations.Aggregation;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.InternalAggregation.ReduceContext;
 import org.elasticsearch.search.aggregations.InternalAggregation.Type;
@@ -64,13 +62,6 @@ public class BucketSelectorPipelineAggregator extends PipelineAggregator {
         PipelineAggregatorStreams.registerStream(STREAM, TYPE.stream());
     }
 
-    private static final Function<Aggregation, InternalAggregation> FUNCTION = new Function<Aggregation, InternalAggregation>() {
-        @Override
-        public InternalAggregation apply(Aggregation input) {
-            return (InternalAggregation) input;
-        }
-    };
-
     private GapPolicy gapPolicy;
 
     private Script script;
@@ -98,7 +89,7 @@ public class BucketSelectorPipelineAggregator extends PipelineAggregator {
         InternalMultiBucketAggregation<InternalMultiBucketAggregation, InternalMultiBucketAggregation.InternalBucket> originalAgg = (InternalMultiBucketAggregation<InternalMultiBucketAggregation, InternalMultiBucketAggregation.InternalBucket>) aggregation;
         List<? extends Bucket> buckets = originalAgg.getBuckets();
 
-        CompiledScript compiledScript = reduceContext.scriptService().compile(script, ScriptContext.Standard.AGGS);
+        CompiledScript compiledScript = reduceContext.scriptService().compile(script, ScriptContext.Standard.AGGS, reduceContext);
         List newBuckets = new ArrayList<>();
         for (Bucket bucket : buckets) {
             Map<String, Object> vars = new HashMap<>();

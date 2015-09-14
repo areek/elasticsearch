@@ -20,8 +20,7 @@
 package org.elasticsearch.search.builder;
 
 import com.carrotsearch.hppc.ObjectFloatHashMap;
-import com.google.common.base.Charsets;
-import com.google.common.collect.ImmutableList;
+import java.nio.charset.StandardCharsets;
 import org.elasticsearch.ElasticsearchGenerationException;
 import org.elasticsearch.action.support.QuerySourceBuilder;
 import org.elasticsearch.action.support.ToXContentToBytes;
@@ -176,7 +175,7 @@ public class SearchSourceBuilder extends ToXContentToBytes {
      * Constructs a new search source builder with a raw search query.
      */
     public SearchSourceBuilder query(String queryString) {
-        return query(queryString.getBytes(Charsets.UTF_8));
+        return query(queryString.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -215,7 +214,7 @@ public class SearchSourceBuilder extends ToXContentToBytes {
      * (and not aggs for example).
      */
     public SearchSourceBuilder postFilter(String postFilterString) {
-        return postFilter(postFilterString.getBytes(Charsets.UTF_8));
+        return postFilter(postFilterString.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -540,7 +539,7 @@ public class SearchSourceBuilder extends ToXContentToBytes {
      * per field.
      */
     public SearchSourceBuilder noFields() {
-        this.fieldNames = ImmutableList.of();
+        this.fieldNames = Collections.emptyList();
         return this;
     }
 

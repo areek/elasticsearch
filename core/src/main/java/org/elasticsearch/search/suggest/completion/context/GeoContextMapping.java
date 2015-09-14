@@ -22,9 +22,9 @@ package org.elasticsearch.search.suggest.completion.context;
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.search.suggest.xdocument.ContextQuery;
+import org.apache.lucene.util.GeoHashUtils;
 import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.common.Nullable;
-import org.elasticsearch.common.geo.GeoHashUtils;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.geo.GeoUtils;
 import org.elasticsearch.common.unit.DistanceUnit;
@@ -146,7 +146,7 @@ public class GeoContextMapping extends ContextMapping<GeoQueryContext> {
                 if (parser.nextToken() == Token.VALUE_NUMBER) {
                     double lat = parser.doubleValue();
                     if (parser.nextToken() == Token.END_ARRAY) {
-                        contexts.add(GeoHashUtils.encode(lat, lon, precision));
+                        contexts.add(GeoHashUtils.stringEncode(lat, lon, precision));
                     } else {
                         throw new ElasticsearchParseException("only two values expected");
                     }
@@ -156,14 +156,14 @@ public class GeoContextMapping extends ContextMapping<GeoQueryContext> {
             } else {
                 while (token != Token.END_ARRAY) {
                     GeoPoint point = GeoUtils.parseGeoPoint(parser);
-                    contexts.add(GeoHashUtils.encode(point.getLat(), point.getLon(), precision));
+                    contexts.add(GeoHashUtils.stringEncode(point.getLat(), point.getLon(), precision));
                     token = parser.nextToken();
                 }
             }
         } else {
             // or a single location
             GeoPoint point = GeoUtils.parseGeoPoint(parser);
-            contexts.add(GeoHashUtils.encode(point.getLat(), point.getLon(), precision));
+            contexts.add(GeoHashUtils.stringEncode(point.getLat(), point.getLon(), precision));
         }
         return contexts;
     }
@@ -186,7 +186,7 @@ public class GeoContextMapping extends ContextMapping<GeoQueryContext> {
                         // we write doc values fields differently: one field for all values, so we need to only care about indexed fields
                         if (lonField.fieldType().docValuesType() == DocValuesType.NONE) {
                             spare.reset(latField.numericValue().doubleValue(), lonField.numericValue().doubleValue());
-                            geohashes.add(GeoHashUtils.encode(spare.getLat(), spare.getLon(), precision));
+                            geohashes.add(GeoHashUtils.stringEncode(spare.getLat(), spare.getLon(), precision));
                         }
                     }
                 }

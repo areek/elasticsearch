@@ -18,8 +18,6 @@
  */
 package org.elasticsearch.index.query;
 
-import com.google.common.collect.Maps;
-
 import org.elasticsearch.action.index.IndexRequest.OpType;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.indexedscripts.delete.DeleteIndexedScriptResponse;
@@ -101,7 +99,7 @@ public class TemplateQueryIT extends ESIntegTestCase {
                 "        }\n" +
                 "    }\n" +
                 "}";
-        SearchResponse sr = client().prepareSearch().setSource(request)
+        SearchResponse sr = client().prepareSearch().setSource(new BytesArray(request))
                 .execute().actionGet();
         assertNoFailures(sr);
         assertThat(sr.getHits().hits().length, equalTo(0));
@@ -117,7 +115,7 @@ public class TemplateQueryIT extends ESIntegTestCase {
                 "    \"size\":0" +
                 "}";
 
-        sr = client().prepareSearch().setSource(request)
+        sr = client().prepareSearch().setSource(new BytesArray(request))
                 .execute().actionGet();
         assertNoFailures(sr);
         assertThat(sr.getHits().hits().length, equalTo(0));
@@ -213,7 +211,7 @@ public class TemplateQueryIT extends ESIntegTestCase {
         index("test", "type", "5", jsonBuilder().startObject().field("otherField", "foo").endObject());
         refresh();
 
-        Map<String, Object> templateParams = Maps.newHashMap();
+        Map<String, Object> templateParams = new HashMap<>();
         templateParams.put("mySize", "2");
         templateParams.put("myField", "theField");
         templateParams.put("myValue", "foo");
@@ -333,7 +331,7 @@ public class TemplateQueryIT extends ESIntegTestCase {
 
         indexRandom(true, builders);
 
-        Map<String, Object> templateParams = Maps.newHashMap();
+        Map<String, Object> templateParams = new HashMap<>();
         templateParams.put("fieldParam", "foo");
 
         SearchResponse searchResponse = client().prepareSearch("test").setTypes("type")
@@ -396,7 +394,7 @@ public class TemplateQueryIT extends ESIntegTestCase {
 
         indexRandom(true, builders);
 
-        Map<String, Object> templateParams = Maps.newHashMap();
+        Map<String, Object> templateParams = new HashMap<>();
         templateParams.put("fieldParam", "foo");
 
         SearchResponse searchResponse = client()
@@ -480,7 +478,7 @@ public class TemplateQueryIT extends ESIntegTestCase {
             GetIndexedScriptResponse getResponse = client().prepareGetIndexedScript(MustacheScriptEngineService.NAME, "git01").get();
             assertTrue(getResponse.isExists());
 
-            Map<String, Object> templateParams = Maps.newHashMap();
+            Map<String, Object> templateParams = new HashMap<>();
             templateParams.put("P_Keyword1", "dev");
 
             try {
