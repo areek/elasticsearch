@@ -45,6 +45,7 @@ public class CompletionSuggestionBuilder extends SuggestBuilder.SuggestionBuilde
     private FuzzyOptionsBuilder fuzzyOptionsBuilder;
     private RegexOptionsBuilder regexOptionsBuilder;
     private List<QueryContexts> queryContextsList;
+    private String[] fields;
 
     public CompletionSuggestionBuilder(String name) {
         super(name, "completion");
@@ -219,6 +220,11 @@ public class CompletionSuggestionBuilder extends SuggestBuilder.SuggestionBuilde
         return this;
     }
 
+    public CompletionSuggestionBuilder payloadFields(String... fields) {
+        this.fields = fields;
+        return this;
+    }
+
     /**
      * Same as {@link #prefix(String)} with fuzziness of <code>fuzziness</code>
      */
@@ -289,6 +295,13 @@ public class CompletionSuggestionBuilder extends SuggestBuilder.SuggestionBuilde
 
     @Override
     protected XContentBuilder innerToXContent(XContentBuilder builder, Params params) throws IOException {
+        if (fields != null) {
+            builder.startArray("fields");
+            for (String field : fields) {
+                builder.value(field);
+            }
+            builder.endArray();
+        }
         if (fuzzyOptionsBuilder != null) {
             fuzzyOptionsBuilder.toXContent(builder, params);
         }

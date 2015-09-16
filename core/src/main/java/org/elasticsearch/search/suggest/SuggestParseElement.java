@@ -22,6 +22,7 @@ import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.HasContextAndHeaders;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.query.IndexQueryParserService;
 import org.elasticsearch.search.SearchParseElement;
@@ -48,12 +49,12 @@ public final class SuggestParseElement implements SearchParseElement {
     @Override
     public void parse(XContentParser parser, SearchContext context) throws Exception {
         SuggestionSearchContext suggestionSearchContext = parseInternal(parser, context.mapperService(), context.queryParserService(),
-                context.shardTarget().index(), context.shardTarget().shardId(), context);
+                context.fieldData(), context.shardTarget().index(), context.shardTarget().shardId(), context);
         context.suggest(suggestionSearchContext);
     }
 
     public SuggestionSearchContext parseInternal(XContentParser parser, MapperService mapperService,
-            IndexQueryParserService queryParserService, String index, int shardId, HasContextAndHeaders headersContext) throws IOException {
+            IndexQueryParserService queryParserService, IndexFieldDataService fieldDataService, String index, int shardId, HasContextAndHeaders headersContext) throws IOException {
         SuggestionSearchContext suggestionSearchContext = new SuggestionSearchContext();
 
         BytesRef globalText = null;
@@ -101,7 +102,7 @@ public final class SuggestParseElement implements SearchParseElement {
                         if (contextParser instanceof CompletionSuggestParser) {
                             ((CompletionSuggestParser) contextParser).setOldCompletionSuggester(((CompletionSuggester) suggesters.get("completion_old")));
                         }
-                        suggestionContext = contextParser.parse(parser, mapperService, queryParserService, headersContext);
+                        suggestionContext = contextParser.parse(parser, mapperService, queryParserService, fieldDataService, headersContext);
                     }
                 }
                 if (suggestionContext != null) {

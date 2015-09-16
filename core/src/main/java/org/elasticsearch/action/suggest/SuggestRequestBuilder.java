@@ -39,7 +39,7 @@ import java.io.IOException;
  */
 public class SuggestRequestBuilder extends BroadcastOperationRequestBuilder<SuggestRequest, SuggestResponse, SuggestRequestBuilder> {
 
-    final SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+    final SuggestBuilder suggestBuilder = new SuggestBuilder();
 
     public SuggestRequestBuilder(ElasticsearchClient client, SuggestAction action) {
         super(client, action, new SuggestRequest());
@@ -49,7 +49,7 @@ public class SuggestRequestBuilder extends BroadcastOperationRequestBuilder<Sugg
      * Add a definition for suggestions to the request
      */
     public <T> SuggestRequestBuilder addSuggestion(SuggestionBuilder<T> suggestion) {
-        searchSourceBuilder.suggest().addSuggestion(suggestion);
+        suggestBuilder.addSuggestion(suggestion);
         return this;
     }
 
@@ -62,7 +62,7 @@ public class SuggestRequestBuilder extends BroadcastOperationRequestBuilder<Sugg
     }
 
     public SuggestRequestBuilder setSuggestText(String globalText) {
-        searchSourceBuilder.suggest().setText(globalText);
+        suggestBuilder.setText(globalText);
         return this;
     }
 
@@ -85,62 +85,11 @@ public class SuggestRequestBuilder extends BroadcastOperationRequestBuilder<Sugg
         return this;
     }
 
-    /**
-     * Indicates whether the response should contain the stored _source for
-     * every hit
-     */
-    public SuggestRequestBuilder fetchSource(boolean fetch) {
-        searchSourceBuilder.fetchSource(fetch);
-        return this;
-    }
-
-    /**
-     * Indicate that _source should be returned with every hit, with an
-     * "include" and/or "exclude" set which can include simple wildcard
-     * elements.
-     *
-     * @param include
-     *            An optional include (optionally wildcarded) pattern to filter
-     *            the returned _source
-     * @param exclude
-     *            An optional exclude (optionally wildcarded) pattern to filter
-     *            the returned _source
-     */
-    public SuggestRequestBuilder fetchSource(@Nullable String include, @Nullable String exclude) {
-        searchSourceBuilder.fetchSource(include, exclude);
-        return this;
-    }
-
-    /**
-     * Indicate that _source should be returned with every hit, with an
-     * "include" and/or "exclude" set which can include simple wildcard
-     * elements.
-     *
-     * @param includes
-     *            An optional list of include (optionally wildcarded) pattern to
-     *            filter the returned _source
-     * @param excludes
-     *            An optional list of exclude (optionally wildcarded) pattern to
-     *            filter the returned _source
-     */
-    public SuggestRequestBuilder fetchSource(@Nullable String[] includes, @Nullable String[] excludes) {
-        searchSourceBuilder.fetchSource(includes, excludes);
-        return this;
-    }
-
-    /**
-     * Indicate how the _source should be fetched.
-     */
-    public SuggestRequestBuilder fetchSource(@Nullable FetchSourceContext fetchSourceContext) {
-        searchSourceBuilder.fetchSource(fetchSourceContext);
-        return this;
-    }
-
     @Override
     protected SuggestRequest beforeExecute(SuggestRequest request) {
         try {
             XContentBuilder builder = XContentFactory.contentBuilder(Requests.CONTENT_TYPE);
-            searchSourceBuilder.toXContent(builder, ToXContent.EMPTY_PARAMS);
+            suggestBuilder.toXContent(builder, ToXContent.EMPTY_PARAMS);
             request.suggest(builder.bytes());
         } catch (IOException e) {
             throw new ElasticsearchException("Unable to build suggestion request", e);

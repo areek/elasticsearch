@@ -138,35 +138,7 @@ public class CompletionSuggestion extends Suggest.Suggestion<CompletionSuggestio
         return this;
     }
 
-    public void populateEntry(String input, TopSuggestDocs topSuggestDocs, int size, ContextMappings contextMappings) {
-        Map<Integer, Option> results = new LinkedHashMap<>(size);
-        CompletionSuggestion.Entry completionSuggestEntry = new CompletionSuggestion.Entry(new StringText(input), 0, input.length());
-        for (TopSuggestDocs.SuggestScoreDoc suggestDoc : topSuggestDocs.scoreLookupDocs()) {
-            // TODO: currently we can get multiple entries with the same docID
-            // this has to be fixed at the lucene level
-            // This has other implications:
-            // if we index a suggestion with n contexts, the suggestion and all its contexts
-            // would count as n hits rather than 1, so we have to multiply the desired size
-            // with n to get a suggestion with all n contexts
-            final Map.Entry<String, CharSequence> contextEntry;
-            if (contextMappings != null && suggestDoc.context != null) {
-                contextEntry = contextMappings.getNamedContext(suggestDoc.context);
-            } else {
-                assert suggestDoc.context == null;
-                contextEntry = null;
-            }
-            final Option value = results.get(suggestDoc.doc);
-            if (value == null) {
-                final Option option = new Option(new StringText(suggestDoc.key.toString()), suggestDoc.score, contextEntry);
-                results.put(suggestDoc.doc, option);
-                completionSuggestEntry.addOption(option);
-            } else {
-                value.addContextEntry(contextEntry);
-                if (value.getScore() < suggestDoc.score) {
-                    value.setScore(suggestDoc.score);
-                }
-            }
-        }
+    public void populateEntry(String input, LinkedHashMap<Integer, Option> results) {
         ScoreDoc[] scoreDocs = new ScoreDoc[results.size()];
         Iterator<Map.Entry<Integer, Option>> iterator = results.entrySet().iterator();
         for (int i = 0; iterator.hasNext(); i++) {
@@ -177,13 +149,14 @@ public class CompletionSuggestion extends Suggest.Suggestion<CompletionSuggestio
         if (this.entries.size() > 0) {
             throw new IllegalStateException("only a single entry is allowed for CompletionSuggestion");
         }
-        this.entries.add(completionSuggestEntry);
+        this.entries.add(new CompletionSuggestion.Entry(new StringText(input), 0, input.length(), results.values()));
     }
 
     public static class Entry extends Suggest.Suggestion.Entry<CompletionSuggestion.Entry.Option> {
 
-        private Entry(Text text, int offset, int length) {
+        private Entry(Text text, int offset, int length, Collection<Option> options) {
             super(text, offset, length);
+            options.forEach(this::addOption);
         }
 
         protected Entry() {
@@ -202,10 +175,12 @@ public class CompletionSuggestion extends Suggest.Suggestion<CompletionSuggestio
 
         public static class Option extends Suggest.Suggestion.Entry.Option {
             private Map<String, Set<CharSequence>> contexts = new TreeMap<>();
+            private Map<String, List<Object>> payloads;
             private SearchHit hit;
 
-            private Option(Text text, float score, Map.Entry<String, CharSequence> contextEntry) {
+            Option(Text text, float score, Map.Entry<String, CharSequence> contextEntry, Map<String, List<Object>> payloads) {
                 super(text, score);
+                this.payloads = payloads;
                 addContextEntry(contextEntry);
             }
 
@@ -242,6 +217,10 @@ public class CompletionSuggestion extends Suggest.Suggestion<CompletionSuggestio
                 }
             }
 
+            public Map<String, List<Object>> getPayloads() {
+                return payloads;
+            }
+
             public Map<String, Set<CharSequence>> getContexts() {
                 return contexts;
             }
@@ -249,8 +228,17 @@ public class CompletionSuggestion extends Suggest.Suggestion<CompletionSuggestio
             @Override
             protected XContentBuilder innerToXContent(XContentBuilder builder, Params params) throws IOException {
                 builder.field("text", getText());
-                if (hit == null) {
-                    builder.field("score", getScore());
+                builder.field("score", getScore());
+                if (payloads.size() > 0) {
+                    builder.startObject("payloads");
+                    for (Map.Entry<String, List<Object>> entry : payloads.entrySet()) {
+                        builder.startArray(entry.getKey());
+                        for (Object payload : entry.getValue()) {
+                            builder.value(payload);
+                        }
+                        builder.endArray();
+                    }
+                    builder.endObject();
                 }
                 if (contexts.size() > 0) {
                     builder.startObject("contexts");
@@ -272,8 +260,18 @@ public class CompletionSuggestion extends Suggest.Suggestion<CompletionSuggestio
             @Override
             public void readFrom(StreamInput in) throws IOException {
                 super.readFrom(in);
-                int size = in.readInt();
-                for (int i = 0; i < size; i++) {
+                int payloadSize = in.readInt();
+                for (int i = 0; i < payloadSize; i++) {
+                    String payloadName = in.readString();
+                    int nValues = in.readVInt();
+                    List<Object> values = new ArrayList<>(nValues);
+                    for (int j = 0; j < nValues; j++) {
+                        values.add(in.readGenericValue());
+                    }
+                    this.payloads.put(payloadName, values);
+                }
+                int contextSize = in.readInt();
+                for (int i = 0; i < contextSize; i++) {
                     String contextName = in.readString();
                     int nContexts = in.readVInt();
                     Set<CharSequence> contexts = new HashSet<>(nContexts);
@@ -290,6 +288,15 @@ public class CompletionSuggestion extends Suggest.Suggestion<CompletionSuggestio
             @Override
             public void writeTo(StreamOutput out) throws IOException {
                 super.writeTo(out);
+                out.writeInt(payloads.size());
+                for (Map.Entry<String, List<Object>> entry : payloads.entrySet()) {
+                    out.writeString(entry.getKey());
+                    List<Object> values = entry.getValue();
+                    out.writeVInt(values.size());
+                    for (Object value : values) {
+                        out.writeGenericValue(value);
+                    }
+                }
                 out.writeInt(contexts.size());
                 for (Map.Entry<String, Set<CharSequence>> entry : contexts.entrySet()) {
                     out.writeString(entry.getKey());

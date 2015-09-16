@@ -26,6 +26,7 @@ import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.core.OldCompletionFieldMapper;
@@ -39,9 +40,7 @@ import org.elasticsearch.search.suggest.completion.context.ContextMappings;
 import org.elasticsearch.search.suggest.completion.context.ContextMappingsParser;
 
 import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.elasticsearch.search.suggest.SuggestUtils.parseSuggestContext;
 import static org.elasticsearch.search.suggest.completion.context.ContextMappingsParser.parseQueryContext;
@@ -88,7 +87,7 @@ public class CompletionSuggestParser implements SuggestContextParser {
 
     @Override
     public SuggestionSearchContext.SuggestionContext parse(XContentParser parser, MapperService mapperService,
-            IndexQueryParserService queryParserService, HasContextAndHeaders headersContext) throws IOException {
+                                                           IndexQueryParserService queryParserService, IndexFieldDataService fieldDataService, HasContextAndHeaders headersContext) throws IOException {
         XContentParser.Token token;
         String fieldName = null;
         CompletionSuggestionContext suggestion = new CompletionSuggestionContext(completionSuggester);
@@ -96,6 +95,7 @@ public class CompletionSuggestParser implements SuggestContextParser {
         XContentParser contextParser = null;
         CompletionSuggestionBuilder.FuzzyOptionsBuilder fuzzyOptions = null;
         CompletionSuggestionBuilder.RegexOptionsBuilder regexOptions = null;
+        Set<String> fields = new HashSet<>(1);
 
         while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
             if (token == XContentParser.Token.FIELD_NAME) {
@@ -106,6 +106,8 @@ public class CompletionSuggestParser implements SuggestContextParser {
                         if (parser.booleanValue()) {
                             fuzzyOptions = new CompletionSuggestionBuilder.FuzzyOptionsBuilder();
                         }
+                    } else if (token == XContentParser.Token.VALUE_STRING && "fields".equals(fieldName)) {
+                        fields.add(parser.text());
                     }
                 }
             } else if (token == XContentParser.Token.START_OBJECT) {
@@ -159,6 +161,14 @@ public class CompletionSuggestParser implements SuggestContextParser {
                 } else {
                     throw new IllegalArgumentException("suggester [completion] doesn't support field [" + fieldName + "]");
                 }
+            } else if (token == XContentParser.Token.START_ARRAY) {
+                if ("fields".equals(fieldName)) {
+                    while (parser.nextToken() != XContentParser.Token.END_ARRAY) {
+                        fields.add(parser.text());
+                    }
+                } else {
+                    throw new IllegalArgumentException("suggester [completion] doesn't support field [" + fieldName + "]");
+                }
             } else {
                 throw new IllegalArgumentException("suggester [completion] doesn't support field [" + fieldName + "]");
             }
@@ -179,6 +189,9 @@ public class CompletionSuggestParser implements SuggestContextParser {
             }
 
             suggestion.fieldType(type);
+            suggestion.mapperService(mapperService);
+            suggestion.fieldData(fieldDataService);
+            suggestion.fields(fields);
             suggestion.setFuzzyOptionsBuilder(fuzzyOptions);
             suggestion.setRegexOptionsBuilder(regexOptions);
             suggestion.setQueryContexts(queryContexts);

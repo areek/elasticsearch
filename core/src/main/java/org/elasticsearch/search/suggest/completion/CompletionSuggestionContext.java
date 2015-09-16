@@ -18,12 +18,16 @@
  */
 package org.elasticsearch.search.suggest.completion;
 
+import org.elasticsearch.index.fielddata.IndexFieldDataService;
+import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.core.CompletionFieldMapper;
 import org.elasticsearch.search.suggest.Suggester;
 import org.elasticsearch.search.suggest.SuggestionSearchContext;
 import org.elasticsearch.search.suggest.completion.context.ContextMapping;
 
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 
 /**
  *
@@ -34,6 +38,9 @@ public class CompletionSuggestionContext extends SuggestionSearchContext.Suggest
     private CompletionSuggestionBuilder.FuzzyOptionsBuilder fuzzyOptionsBuilder;
     private CompletionSuggestionBuilder.RegexOptionsBuilder regexOptionsBuilder;
     private Map<String, ContextMapping.QueryContexts> queryContexts;
+    private MapperService mapperService;
+    private IndexFieldDataService fieldData;
+    private Set<String> fields = Collections.emptySet();
 
     CompletionSuggestionContext(Suggester suggester) {
         super(suggester);
@@ -69,5 +76,29 @@ public class CompletionSuggestionContext extends SuggestionSearchContext.Suggest
 
     Map<String, ContextMapping.QueryContexts> getQueryContexts() {
         return queryContexts;
+    }
+
+    void mapperService(MapperService mapperService) {
+        this.mapperService = mapperService;
+    }
+
+    MapperService mapperService() {
+        return mapperService;
+    }
+
+    IndexFieldDataService fieldData() {
+        return fieldData;
+    }
+
+    void fieldData(IndexFieldDataService fieldData) {
+        this.fieldData = fieldData;
+    }
+
+    void fields(Set<String> fields) {
+        this.fields = fields;
+    }
+
+    Set<String> fields() {
+        return fields;
     }
 }

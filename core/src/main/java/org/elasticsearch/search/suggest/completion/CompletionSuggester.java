@@ -19,15 +19,23 @@
 package org.elasticsearch.search.suggest.completion;
 
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.search.BulkScorer;
 import org.apache.lucene.search.CollectionTerminatedException;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.suggest.xdocument.CompletionQuery;
+import org.apache.lucene.search.suggest.xdocument.TopSuggestDocs;
 import org.apache.lucene.search.suggest.xdocument.TopSuggestDocsCollector;
+import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.CharsRefBuilder;
 import org.elasticsearch.ElasticsearchException;
+import org.elasticsearch.common.text.StringText;
 import org.elasticsearch.common.unit.Fuzziness;
+import org.elasticsearch.index.fielddata.AtomicFieldData;
+import org.elasticsearch.index.fielddata.ScriptDocValues;
+import org.elasticsearch.index.fielddata.SortedBinaryDocValues;
+import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.core.CompletionFieldMapper;
 import org.elasticsearch.search.suggest.Suggest;
 import org.elasticsearch.search.suggest.SuggestContextParser;
@@ -35,6 +43,7 @@ import org.elasticsearch.search.suggest.Suggester;
 import org.elasticsearch.search.suggest.completion.context.ContextMappings;
 
 import java.io.IOException;
+import java.util.*;
 
 public class CompletionSuggester extends Suggester<CompletionSuggestionContext> {
 
@@ -53,7 +62,53 @@ public class CompletionSuggester extends Suggester<CompletionSuggestionContext> 
         spare.copyUTF8Bytes(suggestionContext.getText());
         TopSuggestDocsCollector collector = new TopSuggestDocsCollector(suggestionContext.getSize());
         suggest(searcher, toQuery(suggestionContext), collector);
-        completionSuggestion.populateEntry(spare.toString(), collector.get(), suggestionContext.getSize(), suggestionContext.fieldType().getContextMappings());
+        final TopSuggestDocs topSuggestDocs = collector.get();
+        final ContextMappings contextMappings = suggestionContext.fieldType().getContextMappings();
+        LinkedHashMap<Integer, CompletionSuggestion.Entry.Option> results = new LinkedHashMap<>(suggestionContext.getSize());
+        for (TopSuggestDocs.SuggestScoreDoc suggestDoc : topSuggestDocs.scoreLookupDocs()) {
+            // TODO: currently we can get multiple entries with the same docID
+            // this has to be fixed at the lucene level
+            // This has other implications:
+            // if we index a suggestion with n contexts, the suggestion and all its contexts
+            // would count as n hits rather than 1, so we have to multiply the desired size
+            // with n to get a suggestion with all n contexts
+            final Map.Entry<String, CharSequence> contextEntry;
+            if (contextMappings != null && suggestDoc.context != null) {
+                contextEntry = contextMappings.getNamedContext(suggestDoc.context);
+            } else {
+                assert suggestDoc.context == null;
+                contextEntry = null;
+            }
+            final CompletionSuggestion.Entry.Option value = results.get(suggestDoc.doc);
+            if (value == null) {
+                final Map<String, List<Object>> payloads;
+                if (!suggestionContext.fields().isEmpty()) {
+                    int readerIndex = ReaderUtil.subIndex(suggestDoc.doc, searcher.getIndexReader().leaves());
+                    LeafReaderContext subReaderContext = searcher.getIndexReader().leaves().get(readerIndex);
+                    int subDocId = suggestDoc.doc - subReaderContext.docBase;
+                    payloads = new HashMap<>(suggestionContext.fields().size());
+                    for (String field : suggestionContext.fields()) {
+                        MappedFieldType fieldType = suggestionContext.mapperService().smartNameFieldType(field);
+                        if (fieldType != null) {
+                            AtomicFieldData data = suggestionContext.fieldData().getForField(fieldType).load(subReaderContext);
+                            ScriptDocValues scriptValues = data.getScriptValues();
+                            scriptValues.setNextDocId(subDocId);
+                            payloads.put(field, scriptValues.getValues());
+                        }
+                    }
+                } else {
+                    payloads = Collections.emptyMap();
+                }
+                final CompletionSuggestion.Entry.Option option = new CompletionSuggestion.Entry.Option(new StringText(suggestDoc.key.toString()), suggestDoc.score, contextEntry, payloads);
+                results.put(suggestDoc.doc, option);
+            } else {
+                value.addContextEntry(contextEntry);
+                if (value.getScore() < suggestDoc.score) {
+                    value.setScore(suggestDoc.score);
+                }
+            }
+        }
+        completionSuggestion.populateEntry(spare.toString(), results);
         return completionSuggestion;
     }
 
