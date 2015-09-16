@@ -19,21 +19,25 @@
 package org.elasticsearch.search.suggest;
 
 import org.apache.lucene.util.BytesRef;
+import org.elasticsearch.common.HasContextAndHeaders;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.index.mapper.MapperService;
+import org.elasticsearch.index.query.IndexQueryParserService;
 import org.elasticsearch.search.SearchParseElement;
 import org.elasticsearch.search.internal.SearchContext;
 import org.elasticsearch.search.suggest.SuggestionSearchContext.SuggestionContext;
 import org.elasticsearch.search.suggest.completion.CompletionSuggestParser;
 import org.elasticsearch.search.suggest.completion.old.CompletionSuggester;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
  *
  */
-public class SuggestParseElement implements SearchParseElement {
+public final class SuggestParseElement implements SearchParseElement {
     private Suggesters suggesters;
 
     @Inject
@@ -43,6 +47,13 @@ public class SuggestParseElement implements SearchParseElement {
 
     @Override
     public void parse(XContentParser parser, SearchContext context) throws Exception {
+        SuggestionSearchContext suggestionSearchContext = parseInternal(parser, context.mapperService(), context.queryParserService(),
+                context.shardTarget().index(), context.shardTarget().shardId(), context);
+        context.suggest(suggestionSearchContext);
+    }
+
+    public SuggestionSearchContext parseInternal(XContentParser parser, MapperService mapperService,
+            IndexQueryParserService queryParserService, String index, int shardId, HasContextAndHeaders headersContext) throws IOException {
         SuggestionSearchContext suggestionSearchContext = new SuggestionSearchContext();
 
         BytesRef globalText = null;
@@ -90,7 +101,7 @@ public class SuggestParseElement implements SearchParseElement {
                         if (contextParser instanceof CompletionSuggestParser) {
                             ((CompletionSuggestParser) contextParser).setOldCompletionSuggester(((CompletionSuggester) suggesters.get("completion_old")));
                         }
-                        suggestionContext = contextParser.parse(parser, context.mapperService(), context.queryParserService());
+                        suggestionContext = contextParser.parse(parser, mapperService, queryParserService, headersContext);
                     }
                 }
                 if (suggestionContext != null) {
@@ -106,6 +117,7 @@ public class SuggestParseElement implements SearchParseElement {
                     }
                     suggestionContexts.put(suggestionName, suggestionContext);
                 }
+
             }
         }
 
@@ -113,11 +125,12 @@ public class SuggestParseElement implements SearchParseElement {
             String suggestionName = entry.getKey();
             SuggestionContext suggestionContext = entry.getValue();
 
-            suggestionContext.setShard(context.shardTarget().shardId());
-            suggestionContext.setIndex(context.shardTarget().getIndex());
-            SuggestUtils.verifySuggestion(context.mapperService(), globalText, suggestionContext);
+            suggestionContext.setShard(shardId);
+            suggestionContext.setIndex(index);
+            SuggestUtils.verifySuggestion(mapperService, globalText, suggestionContext);
             suggestionSearchContext.addSuggestion(suggestionName, suggestionContext);
         }
-        context.suggest(suggestionSearchContext);
+
+        return suggestionSearchContext;
     }
 }
