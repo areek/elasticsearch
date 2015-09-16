@@ -48,10 +48,10 @@ public class TransportDeleteIndexAction extends TransportMasterNodeAction<Delete
     public TransportDeleteIndexAction(Settings settings, TransportService transportService, ClusterService clusterService,
                                       ThreadPool threadPool, MetaDataDeleteIndexService deleteIndexService,
                                       NodeSettingsService nodeSettingsService, ActionFilters actionFilters,
-                                      IndexNameExpressionResolver indexNameExpressionResolver) {
-        super(settings, DeleteIndexAction.NAME, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver, DeleteIndexRequest.class);
+                                      IndexNameExpressionResolver indexNameExpressionResolver, DestructiveOperations destructiveOperations) {
+        super(settings, DeleteIndexAction.NAME, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver, DeleteIndexRequest::new);
         this.deleteIndexService = deleteIndexService;
-        this.destructiveOperations = new DestructiveOperations(logger, settings, nodeSettingsService);
+        this.destructiveOperations = destructiveOperations;
     }
 
     @Override

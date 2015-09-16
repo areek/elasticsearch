@@ -21,8 +21,6 @@ package org.elasticsearch.recovery;
 
 import com.carrotsearch.hppc.IntHashSet;
 import com.carrotsearch.hppc.procedures.IntProcedure;
-import com.google.common.base.Predicate;
-import com.google.common.util.concurrent.ListenableFuture;
 import org.apache.lucene.index.IndexFileNames;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
@@ -54,16 +52,17 @@ import org.elasticsearch.indices.IndicesLifecycle;
 import org.elasticsearch.indices.recovery.RecoveryFileChunkRequest;
 import org.elasticsearch.indices.recovery.RecoverySettings;
 import org.elasticsearch.indices.recovery.RecoveryTarget;
+import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.test.BackgroundIndexer;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
+import org.elasticsearch.test.InternalTestCluster;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.transport.Transport;
 import org.elasticsearch.transport.TransportException;
-import org.elasticsearch.transport.TransportModule;
 import org.elasticsearch.transport.TransportRequest;
 import org.elasticsearch.transport.TransportRequestOptions;
 import org.elasticsearch.transport.TransportService;
@@ -76,6 +75,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
@@ -100,11 +100,9 @@ public class RelocationIT extends ESIntegTestCase {
     private final TimeValue ACCEPTABLE_RELOCATION_TIME = new TimeValue(5, TimeUnit.MINUTES);
 
     @Override
-    protected Settings nodeSettings(int nodeOrdinal) {
-        return Settings.builder()
-            .put("plugin.types", MockTransportService.TestPlugin.class.getName()).build();
+    protected Collection<Class<? extends Plugin>> nodePlugins() {
+        return pluginList(MockTransportService.TestPlugin.class);
     }
-
 
     @Test
     public void testSimpleRelocationNoIndexing() {
@@ -364,11 +362,12 @@ public class RelocationIT extends ESIntegTestCase {
     }
 
     @Test
+    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/13542")
     public void testMoveShardsWhileRelocation() throws Exception {
         final String indexName = "test";
 
-        ListenableFuture<String> blueFuture = internalCluster().startNodeAsync(Settings.builder().put("node.color", "blue").build());
-        ListenableFuture<String> redFuture = internalCluster().startNodeAsync(Settings.builder().put("node.color", "red").build());
+        InternalTestCluster.Async<String> blueFuture = internalCluster().startNodeAsync(Settings.builder().put("node.color", "blue").build());
+        InternalTestCluster.Async<String> redFuture = internalCluster().startNodeAsync(Settings.builder().put("node.color", "red").build());
         internalCluster().startNode(Settings.builder().put("node.color", "green").build());
         final String blueNodeName = blueFuture.get();
         final String redNodeName = redFuture.get();
@@ -417,13 +416,10 @@ public class RelocationIT extends ESIntegTestCase {
 
         // Lets wait a bit and then move again to hopefully trigger recovery cancellations.
         boolean applied = awaitBusy(
-                new Predicate<Object>() {
-                    @Override
-                    public boolean apply(Object input) {
-                        RecoveryResponse recoveryResponse = internalCluster().client(redNodeName).admin().indices().prepareRecoveries(indexName)
-                                .get();
-                        return !recoveryResponse.shardResponses().get(indexName).isEmpty();
-                    }
+                () -> {
+                    RecoveryResponse recoveryResponse =
+                            internalCluster().client(redNodeName).admin().indices().prepareRecoveries(indexName).get();
+                    return !recoveryResponse.shardRecoveryStates().get(indexName).isEmpty();
                 }
         );
         assertTrue(applied);

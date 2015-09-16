@@ -18,8 +18,6 @@
  */
 package org.elasticsearch.index.mapper.core;
 
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.codecs.PostingsFormat;
@@ -95,8 +93,8 @@ public class OldCompletionFieldMapper extends FieldMapper {
         public static final String CONTEXT = "context";
     }
 
-    public static final Set<String> ALLOWED_CONTENT_FIELD_NAMES = Sets.newHashSet(Fields.CONTENT_FIELD_NAME_INPUT,
-            Fields.CONTENT_FIELD_NAME_OUTPUT, Fields.CONTENT_FIELD_NAME_PAYLOAD, Fields.CONTENT_FIELD_NAME_WEIGHT, Fields.CONTEXT);
+    public static final Set<String> ALLOWED_CONTENT_FIELD_NAMES = new HashSet<>(Arrays.asList(Fields.CONTENT_FIELD_NAME_INPUT,
+            Fields.CONTENT_FIELD_NAME_OUTPUT, Fields.CONTENT_FIELD_NAME_PAYLOAD, Fields.CONTENT_FIELD_NAME_WEIGHT, Fields.CONTEXT));
 
     public static class Builder extends FieldMapper.Builder<Builder, OldCompletionFieldMapper> {
 
@@ -232,6 +230,27 @@ public class OldCompletionFieldMapper extends FieldMapper {
         }
 
         @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof CompletionFieldType)) return false;
+            if (!super.equals(o)) return false;
+            CompletionFieldType fieldType = (CompletionFieldType) o;
+            return analyzingSuggestLookupProvider.getPreserveSep() == fieldType.analyzingSuggestLookupProvider.getPreserveSep() &&
+                    analyzingSuggestLookupProvider.getPreservePositionsIncrements() == fieldType.analyzingSuggestLookupProvider.getPreservePositionsIncrements() &&
+                    analyzingSuggestLookupProvider.hasPayloads() == fieldType.analyzingSuggestLookupProvider.hasPayloads() &&
+                    Objects.equals(getContextMapping(), fieldType.getContextMapping());
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(super.hashCode(),
+                    analyzingSuggestLookupProvider.getPreserveSep(),
+                    analyzingSuggestLookupProvider.getPreservePositionsIncrements(),
+                    analyzingSuggestLookupProvider.hasPayloads(),
+                    getContextMapping());
+        }
+
+        @Override
         public CompletionFieldType clone() {
             return new CompletionFieldType(this);
         }
@@ -246,16 +265,16 @@ public class OldCompletionFieldMapper extends FieldMapper {
             super.checkCompatibility(fieldType, conflicts, strict);
             CompletionFieldType other = (CompletionFieldType)fieldType;
             if (analyzingSuggestLookupProvider.hasPayloads() != other.analyzingSuggestLookupProvider.hasPayloads()) {
-                conflicts.add("mapper [" + names().fullName() + "] has different payload values");
+                conflicts.add("mapper [" + names().fullName() + "] has different [payload] values");
             }
             if (analyzingSuggestLookupProvider.getPreservePositionsIncrements() != other.analyzingSuggestLookupProvider.getPreservePositionsIncrements()) {
-                conflicts.add("mapper [" + names().fullName() + "] has different 'preserve_position_increments' values");
+                conflicts.add("mapper [" + names().fullName() + "] has different [preserve_position_increments] values");
             }
             if (analyzingSuggestLookupProvider.getPreserveSep() != other.analyzingSuggestLookupProvider.getPreserveSep()) {
-                conflicts.add("mapper [" + names().fullName() + "] has different 'preserve_separators' values");
+                conflicts.add("mapper [" + names().fullName() + "] has different [preserve_separators] values");
             }
             if(!ContextMapping.mappingsAreEqual(getContextMapping(), other.getContextMapping())) {
-                conflicts.add("mapper [" + names().fullName() + "] has different 'context_mapping' values");
+                conflicts.add("mapper [" + names().fullName() + "] has different [context_mapping] values");
             }
         }
 
@@ -344,7 +363,7 @@ public class OldCompletionFieldMapper extends FieldMapper {
                         throw new IllegalArgumentException("Unknown field name[" + currentFieldName + "], must be one of " + ALLOWED_CONTENT_FIELD_NAMES);
                     }
                 } else if (Fields.CONTEXT.equals(currentFieldName)) {
-                    SortedMap<String, ContextConfig> configs = Maps.newTreeMap(); 
+                    SortedMap<String, ContextConfig> configs = new TreeMap<>();
                     
                     if (token == Token.START_OBJECT) {
                         while ((token = parser.nextToken()) != Token.END_OBJECT) {
@@ -357,7 +376,7 @@ public class OldCompletionFieldMapper extends FieldMapper {
                                 configs.put(name, mapping.parseContext(context, parser));
                             }
                         }
-                        contextConfig = Maps.newTreeMap();
+                        contextConfig = new TreeMap<>();
                         for (ContextMapping mapping : fieldType().getContextMapping().values()) {
                             ContextConfig config = configs.get(mapping.name());
                             contextConfig.put(mapping.name(), config==null ? mapping.defaultConfig() : config);
@@ -415,7 +434,7 @@ public class OldCompletionFieldMapper extends FieldMapper {
         }
 
         if(contextConfig == null) {
-            contextConfig = Maps.newTreeMap();
+            contextConfig = new TreeMap<>();
             for (ContextMapping mapping : fieldType().getContextMapping().values()) {
                 contextConfig.put(mapping.name(), mapping.defaultConfig());
             }

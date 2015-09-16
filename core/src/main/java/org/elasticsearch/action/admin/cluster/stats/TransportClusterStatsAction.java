@@ -23,6 +23,7 @@ import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.action.admin.cluster.health.ClusterIndexHealth;
 import org.elasticsearch.action.admin.cluster.node.info.NodeInfo;
 import org.elasticsearch.action.admin.cluster.node.stats.NodeStats;
+import org.elasticsearch.action.admin.indices.stats.CommonStats;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
 import org.elasticsearch.action.admin.indices.stats.ShardStats;
 import org.elasticsearch.action.support.ActionFilters;
@@ -69,7 +70,7 @@ public class TransportClusterStatsAction extends TransportNodesAction<ClusterSta
                                        NodeService nodeService, IndicesService indicesService,
                                        ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver) {
         super(settings, ClusterStatsAction.NAME, clusterName, threadPool, clusterService, transportService, actionFilters,
-                indexNameExpressionResolver, ClusterStatsRequest.class, ClusterStatsNodeRequest.class, ThreadPool.Names.MANAGEMENT);
+                indexNameExpressionResolver, ClusterStatsRequest::new, ClusterStatsNodeRequest::new, ThreadPool.Names.MANAGEMENT);
         this.nodeService = nodeService;
         this.indicesService = indicesService;
     }
@@ -106,7 +107,7 @@ public class TransportClusterStatsAction extends TransportNodesAction<ClusterSta
             for (IndexShard indexShard : indexService) {
                 if (indexShard.routingEntry() != null && indexShard.routingEntry().active()) {
                     // only report on fully started shards
-                    shardsStats.add(new ShardStats(indexShard, SHARD_STATS_FLAGS));
+                    shardsStats.add(new ShardStats(indexShard.routingEntry(), indexShard.shardPath(), new CommonStats(indexShard, SHARD_STATS_FLAGS), indexShard.commitStats()));
                 }
             }
         }
@@ -144,11 +145,11 @@ public class TransportClusterStatsAction extends TransportNodesAction<ClusterSta
         return false;
     }
 
-    static class ClusterStatsNodeRequest extends BaseNodeRequest {
+    public static class ClusterStatsNodeRequest extends BaseNodeRequest {
 
         ClusterStatsRequest request;
 
-        ClusterStatsNodeRequest() {
+        public ClusterStatsNodeRequest() {
         }
 
         ClusterStatsNodeRequest(String nodeId, ClusterStatsRequest request) {

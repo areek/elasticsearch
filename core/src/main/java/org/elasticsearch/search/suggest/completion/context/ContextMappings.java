@@ -19,6 +19,8 @@
 
 package org.elasticsearch.search.suggest.completion.context;
 
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.search.suggest.xdocument.CompletionQuery;
 import org.apache.lucene.search.suggest.xdocument.ContextQuery;
 import org.apache.lucene.search.suggest.xdocument.ContextSuggestField;
@@ -124,6 +126,11 @@ public class ContextMappings implements ToXContent {
             this.contexts = contexts;
             this.document = document;
             this.mapping = mapping;
+        }
+
+        @Override
+        public TokenStream tokenStream(Analyzer analyzer, TokenStream reuse) throws IOException {
+            return super.tokenStream(analyzer, reuse);
         }
 
         @Override

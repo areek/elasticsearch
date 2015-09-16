@@ -19,15 +19,14 @@
 
 package org.elasticsearch.common.http.client;
 
-import com.google.common.base.Charsets;
-import com.google.common.base.Strings;
+import java.nio.charset.StandardCharsets;
 import com.google.common.hash.Hashing;
 import org.apache.lucene.util.IOUtils;
 import org.elasticsearch.*;
 import org.elasticsearch.common.Base64;
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.unit.TimeValue;
-import org.elasticsearch.common.util.ByteArray;
 
 import java.io.*;
 import java.net.HttpURLConnection;
@@ -37,9 +36,7 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
-import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.Callable;
 
 /**
  *
@@ -136,7 +133,7 @@ public class HttpDownloadHelper {
         try {
             if (download(checksumURL, checksumFile, progress, timeout)) {
                 byte[] fileBytes = Files.readAllBytes(originalFile);
-                List<String> checksumLines = Files.readAllLines(checksumFile, Charsets.UTF_8);
+                List<String> checksumLines = Files.readAllLines(checksumFile, StandardCharsets.UTF_8);
                 if (checksumLines.size() != 1) {
                     throw new ElasticsearchCorruptionException("invalid format for checksum file (" +
                             hashFunc.name() + "), expected 1 line, got: " + checksumLines.size());
@@ -152,12 +149,6 @@ public class HttpDownloadHelper {
         } catch (FileNotFoundException | NoSuchFileException e) {
             // checksum file doesn't exist
             return false;
-        } catch (IOException e) {
-            if (ExceptionsHelper.unwrapCause(e) instanceof FileNotFoundException) {
-                // checksum file didn't exist
-                return false;
-            }
-            throw e;
         } finally {
             IOUtils.deleteFilesIgnoringExceptions(checksumFile);
         }
@@ -354,7 +345,7 @@ public class HttpDownloadHelper {
                 if (!isSecureProcotol) {
                     throw new IOException("Basic auth is only supported for HTTPS!");
                 }
-                String basicAuth = Base64.encodeBytes(aSource.getUserInfo().getBytes(Charsets.UTF_8));
+                String basicAuth = Base64.encodeBytes(aSource.getUserInfo().getBytes(StandardCharsets.UTF_8));
                 connection.setRequestProperty("Authorization", "Basic " + basicAuth);
             }
 
@@ -378,9 +369,6 @@ public class HttpDownloadHelper {
                         responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
                         responseCode == HttpURLConnection.HTTP_SEE_OTHER) {
                     String newLocation = httpConnection.getHeaderField("Location");
-                    String message = aSource
-                            + (responseCode == HttpURLConnection.HTTP_MOVED_PERM ? " permanently"
-                            : "") + " moved to " + newLocation;
                     URL newURL = new URL(newLocation);
                     if (!redirectionAllowed(aSource, newURL)) {
                         return null;
@@ -426,7 +414,7 @@ public class HttpDownloadHelper {
                 }
             }
             if (is == null) {
-                throw new IOException("Can't get " + source + " to " + dest, lastEx);
+                throw lastEx;
             }
 
             os = Files.newOutputStream(dest);

@@ -114,6 +114,9 @@ public class FiltersFunctionScoreQuery extends Query {
 
     @Override
     public Query rewrite(IndexReader reader) throws IOException {
+        if (getBoost() != 1.0F) {
+            return super.rewrite(reader);
+        }
         Query newQ = subQuery.rewrite(reader);
         if (newQ == subQuery)
             return this;
@@ -158,22 +161,20 @@ public class FiltersFunctionScoreQuery extends Query {
 
         @Override
         public float getValueForNormalization() throws IOException {
-            float sum = subQueryWeight.getValueForNormalization();
-            sum *= getBoost() * getBoost();
-            return sum;
+            return subQueryWeight.getValueForNormalization();
         }
 
         @Override
-        public void normalize(float norm, float topLevelBoost) {
-            subQueryWeight.normalize(norm, topLevelBoost * getBoost());
+        public void normalize(float norm, float boost) {
+            subQueryWeight.normalize(norm, boost);
         }
 
         @Override
-        public Scorer scorer(LeafReaderContext context, Bits acceptDocs) throws IOException {
+        public Scorer scorer(LeafReaderContext context) throws IOException {
             // we ignore scoreDocsInOrder parameter, because we need to score in
             // order if documents are scored with a script. The
             // ShardLookup depends on in order scoring.
-            Scorer subQueryScorer = subQueryWeight.scorer(context, acceptDocs);
+            Scorer subQueryScorer = subQueryWeight.scorer(context);
             if (subQueryScorer == null) {
                 return null;
             }
@@ -182,7 +183,7 @@ public class FiltersFunctionScoreQuery extends Query {
             for (int i = 0; i < filterFunctions.length; i++) {
                 FilterFunction filterFunction = filterFunctions[i];
                 functions[i] = filterFunction.function.getLeafScoreFunction(context);
-                Scorer filterScorer = filterWeights[i].scorer(context, null); // no need to apply accepted docs
+                Scorer filterScorer = filterWeights[i].scorer(context);
                 docSets[i] = Lucene.asSequentialAccessBits(context.reader().maxDoc(), filterScorer);
             }
             return new FiltersFunctionFactorScorer(this, subQueryScorer, scoreMode, filterFunctions, maxBoost, functions, docSets, combineFunction, minScore, needsScores);
@@ -208,7 +209,7 @@ public class FiltersFunctionScoreQuery extends Query {
                 }
 
                 Bits docSet = Lucene.asSequentialAccessBits(context.reader().maxDoc(),
-                        filterWeights[i].scorer(context, null));
+                        filterWeights[i].scorer(context));
                 if (docSet.get(doc)) {
                     Explanation functionExplanation = filterFunction.function.getLeafScoreFunction(context).explainScore(doc, subQueryExpl);
                     double factor = functionExplanation.getValue();
@@ -219,10 +220,7 @@ public class FiltersFunctionScoreQuery extends Query {
                 }
             }
             if (filterExplanations.size() == 0) {
-                float sc = getBoost() * subQueryExpl.getValue();
-                return Explanation.match(sc, "function score, no filter match, product of:",
-                        subQueryExpl,
-                        Explanation.match(getBoost(), "queryBoost"));
+                return subQueryExpl;
             }
 
             // Second: Compute the factor that would have been computed by the
@@ -266,7 +264,7 @@ public class FiltersFunctionScoreQuery extends Query {
                     CombineFunction.toFloat(factor),
                     "function score, score mode [" + scoreMode.toString().toLowerCase(Locale.ROOT) + "]",
                     filterExplanations);
-            return combineFunction.explain(getBoost(), subQueryExpl, factorExplanation, maxBoost);
+            return combineFunction.explain(subQueryExpl, factorExplanation, maxBoost);
         }
     }
 
@@ -348,7 +346,7 @@ public class FiltersFunctionScoreQuery extends Query {
                     }
                 }
             }
-            return scoreCombiner.combine(subQueryBoost, subQueryScore, factor, maxBoost);
+            return scoreCombiner.combine(subQueryScore, factor, maxBoost);
         }
     }
 

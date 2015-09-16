@@ -38,9 +38,9 @@ public class TransportRenderSearchTemplateAction extends HandledTransportAction<
     private final ScriptService scriptService;
 
     @Inject
-    protected TransportRenderSearchTemplateAction(ScriptService scriptService, Settings settings, ThreadPool threadPool,
+    public TransportRenderSearchTemplateAction(ScriptService scriptService, Settings settings, ThreadPool threadPool,
             TransportService transportService, ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver) {
-        super(settings, RenderSearchTemplateAction.NAME, threadPool, transportService, actionFilters, indexNameExpressionResolver, RenderSearchTemplateRequest.class);
+        super(settings, RenderSearchTemplateAction.NAME, threadPool, transportService, actionFilters, indexNameExpressionResolver, RenderSearchTemplateRequest::new);
         this.scriptService = scriptService;
     }
 
@@ -55,7 +55,7 @@ public class TransportRenderSearchTemplateAction extends HandledTransportAction<
 
             @Override
             protected void doRun() throws Exception {
-                ExecutableScript executable = scriptService.executable(request.template(), ScriptContext.Standard.SEARCH);
+                ExecutableScript executable = scriptService.executable(request.template(), ScriptContext.Standard.SEARCH, request);
                 BytesReference processedTemplate = (BytesReference) executable.run();
                 RenderSearchTemplateResponse response = new RenderSearchTemplateResponse();
                 response.source(processedTemplate);

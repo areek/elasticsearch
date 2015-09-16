@@ -19,7 +19,6 @@
 
 package org.elasticsearch.action.admin.indices.warmer.get;
 
-import com.google.common.collect.ImmutableList;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.master.info.TransportClusterInfoAction;
@@ -35,6 +34,8 @@ import org.elasticsearch.search.warmer.IndexWarmersMetaData;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
+import java.util.List;
+
 /**
  * Internal Actions executed on the master fetching the warmer from the cluster state metadata.
  *
@@ -45,7 +46,7 @@ public class TransportGetWarmersAction extends TransportClusterInfoAction<GetWar
     @Inject
     public TransportGetWarmersAction(Settings settings, TransportService transportService, ClusterService clusterService,
                                      ThreadPool threadPool, ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver) {
-        super(settings, GetWarmersAction.NAME, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver, GetWarmersRequest.class);
+        super(settings, GetWarmersAction.NAME, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver, GetWarmersRequest::new);
     }
 
     @Override
@@ -66,7 +67,7 @@ public class TransportGetWarmersAction extends TransportClusterInfoAction<GetWar
 
     @Override
     protected void doMasterOperation(final GetWarmersRequest request, String[] concreteIndices, final ClusterState state, final ActionListener<GetWarmersResponse> listener) {
-        ImmutableOpenMap<String, ImmutableList<IndexWarmersMetaData.Entry>> result = state.metaData().findWarmers(
+        ImmutableOpenMap<String, List<IndexWarmersMetaData.Entry>> result = state.metaData().findWarmers(
                 concreteIndices, request.types(), request.warmers()
         );
         listener.onResponse(new GetWarmersResponse(result));

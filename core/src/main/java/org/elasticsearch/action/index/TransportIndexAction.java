@@ -78,7 +78,7 @@ public class TransportIndexAction extends TransportReplicationAction<IndexReques
                                 ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver,
                                 AutoCreateIndex autoCreateIndex) {
         super(settings, IndexAction.NAME, transportService, clusterService, indicesService, threadPool, shardStateAction, mappingUpdatedAction,
-                actionFilters, indexNameExpressionResolver, IndexRequest.class, IndexRequest.class, ThreadPool.Names.INDEX);
+                actionFilters, indexNameExpressionResolver, IndexRequest::new, IndexRequest::new, ThreadPool.Names.INDEX);
         this.createIndexAction = createIndexAction;
         this.autoCreateIndex = autoCreateIndex;
         this.allowIdGeneration = settings.getAsBoolean("action.allow_id_generation", true);
@@ -118,11 +118,6 @@ public class TransportIndexAction extends TransportReplicationAction<IndexReques
         } else {
             innerExecute(request, listener);
         }
-    }
-
-    @Override
-    protected boolean resolveIndex() {
-        return true;
     }
 
     @Override

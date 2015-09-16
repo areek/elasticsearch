@@ -21,9 +21,6 @@ package org.elasticsearch.index.mapper;
 
 import com.carrotsearch.hppc.cursors.ObjectCursor;
 import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
-import com.google.common.base.Function;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterators;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
 import org.apache.lucene.index.IndexOptions;
@@ -48,6 +45,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.StreamSupport;
 
 public abstract class FieldMapper extends Mapper {
 
@@ -659,12 +657,7 @@ public abstract class FieldMapper extends Mapper {
         }
 
         public Iterator<Mapper> iterator() {
-            return Iterators.transform(mappers.values().iterator(), new Function<ObjectCursor<FieldMapper>, Mapper>() {
-                @Override
-                public Mapper apply(@Nullable ObjectCursor<FieldMapper> cursor) {
-                    return cursor.value;
-                }
-            });
+            return StreamSupport.stream(mappers.values().spliterator(), false).map((p) -> (Mapper)p.value).iterator();
         }
 
         public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
@@ -695,9 +688,9 @@ public abstract class FieldMapper extends Mapper {
      */
     public static class CopyTo {
 
-        private final ImmutableList<String> copyToFields;
+        private final List<String> copyToFields;
 
-        private CopyTo(ImmutableList<String> copyToFields) {
+        private CopyTo(List<String> copyToFields) {
             this.copyToFields = copyToFields;
         }
 
@@ -713,7 +706,7 @@ public abstract class FieldMapper extends Mapper {
         }
 
         public static class Builder {
-            private final ImmutableList.Builder<String> copyToBuilders = ImmutableList.builder();
+            private final List<String> copyToBuilders = new ArrayList<>();
 
             public Builder add(String field) {
                 copyToBuilders.add(field);
@@ -721,7 +714,7 @@ public abstract class FieldMapper extends Mapper {
             }
 
             public CopyTo build() {
-                return new CopyTo(copyToBuilders.build());
+                return new CopyTo(Collections.unmodifiableList(copyToBuilders));
             }
         }
 

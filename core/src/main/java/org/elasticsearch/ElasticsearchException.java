@@ -26,6 +26,7 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.logging.support.LoggerMessageFormat;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.discovery.Discovery;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.index.shard.ShardId;
@@ -583,7 +584,6 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 org.elasticsearch.index.query.QueryParsingException.class,
                 org.elasticsearch.action.support.replication.TransportReplicationAction.RetryOnPrimaryException.class,
                 org.elasticsearch.index.engine.DeleteByQueryFailedEngineException.class,
-                org.elasticsearch.index.engine.ForceMergeFailedEngineException.class,
                 org.elasticsearch.discovery.MasterNotDiscoveredException.class,
                 org.elasticsearch.action.support.broadcast.BroadcastShardOperationFailedException.class,
                 org.elasticsearch.node.NodeClosedException.class,
@@ -596,7 +596,8 @@ public class ElasticsearchException extends RuntimeException implements ToXConte
                 ResourceNotFoundException.class,
                 IndexNotFoundException.class,
                 ShardNotFoundException.class,
-                NotSerializableExceptionWrapper.class
+                NotSerializableExceptionWrapper.class,
+                Discovery.FailedToCommitClusterStateException.class
         };
         Map<String, Constructor<? extends ElasticsearchException>> mapping = new HashMap<>(exceptions.length);
         for (Class<? extends ElasticsearchException> e : exceptions) {

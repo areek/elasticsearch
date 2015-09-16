@@ -19,7 +19,6 @@
 
 package org.elasticsearch.tribe;
 
-import com.google.common.collect.ImmutableMap;
 import org.apache.lucene.util.LuceneTestCase;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
@@ -41,7 +40,7 @@ import org.elasticsearch.node.Node;
 import org.elasticsearch.node.NodeBuilder;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.InternalTestCluster;
-import org.elasticsearch.test.SettingsSource;
+import org.elasticsearch.test.NodeConfigurationSource;
 import org.elasticsearch.test.TestCluster;
 import org.junit.After;
 import org.junit.AfterClass;
@@ -50,12 +49,9 @@ import org.junit.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
-import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
-import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
-import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailures;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.*;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 
@@ -77,7 +73,7 @@ public class TribeIT extends ESIntegTestCase {
     public static void setupSecondCluster() throws Exception {
         ESIntegTestCase.beforeClass();
         cluster2 = new InternalTestCluster(InternalTestCluster.configuredNodeMode(), randomLong(), createTempDir(), 2, 2,
-                Strings.randomBase64UUID(getRandom()), SettingsSource.EMPTY, 0, false, SECOND_CLUSTER_NODE_PREFIX);
+                Strings.randomBase64UUID(getRandom()), NodeConfigurationSource.EMPTY, 0, false, SECOND_CLUSTER_NODE_PREFIX, true);
 
         cluster2.beforeTest(getRandom(), 0.1);
         cluster2.ensureAtLeastNumDataNodes(2);
@@ -110,7 +106,7 @@ public class TribeIT extends ESIntegTestCase {
     }
 
     private void setupTribeNode(Settings settings) {
-        ImmutableMap<String,String> asMap = internalCluster().getDefaultSettings().getAsMap();
+        Map<String,String> asMap = internalCluster().getDefaultSettings().getAsMap();
         Settings.Builder tribe1Defaults = Settings.builder();
         Settings.Builder tribe2Defaults = Settings.builder();
         for (Map.Entry<String, String> entry : asMap.entrySet()) {

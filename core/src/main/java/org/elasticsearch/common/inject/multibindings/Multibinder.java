@@ -16,7 +16,6 @@
 
 package org.elasticsearch.common.inject.multibindings;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import org.elasticsearch.common.inject.Binder;
 import org.elasticsearch.common.inject.Binding;
@@ -40,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -193,7 +193,7 @@ public abstract class Multibinder<T> {
      * <p>We use a subclass to hide 'implements Module, Provider' from the public
      * API.
      */
-    static final class RealMultibinder<T> extends Multibinder<T>
+    public static final class RealMultibinder<T> extends Multibinder<T>
             implements Module, Provider<Set<T>>, HasDependencies {
 
         private final TypeLiteral<T> elementType;
@@ -209,10 +209,10 @@ public abstract class Multibinder<T> {
 
         private RealMultibinder(Binder binder, TypeLiteral<T> elementType,
                                 String setName, Key<Set<T>> setKey) {
-            this.binder = checkNotNull(binder, "binder");
-            this.elementType = checkNotNull(elementType, "elementType");
-            this.setName = checkNotNull(setName, "setName");
-            this.setKey = checkNotNull(setKey, "setKey");
+            this.binder = Objects.requireNonNull(binder, "binder");
+            this.elementType = Objects.requireNonNull(elementType, "elementType");
+            this.setName = Objects.requireNonNull(setName, "setName");
+            this.setKey = Objects.requireNonNull(setKey, "setKey");
         }
 
         @Override
@@ -236,7 +236,7 @@ public abstract class Multibinder<T> {
          * contents are only evaluated when get() is invoked.
          */
         @Inject
-        void initialize(Injector injector) {
+        public void initialize(Injector injector) {
             providers = new ArrayList<>();
             List<Dependency<?>> dependencies = new ArrayList<>();
             for (Binding<?> entry : injector.findBindingsByType(elementType)) {
@@ -328,6 +328,6 @@ public abstract class Multibinder<T> {
 
         NullPointerException npe = new NullPointerException(name);
         throw new ConfigurationException(ImmutableSet.of(
-                new Message(ImmutableList.of(), npe.toString(), npe)));
+                new Message(Collections.emptyList(), npe.toString(), npe)));
     }
 }

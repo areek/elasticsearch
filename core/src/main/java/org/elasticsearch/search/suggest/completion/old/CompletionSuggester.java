@@ -18,7 +18,6 @@
  */
 package org.elasticsearch.search.suggest.completion.old;
 
-import com.google.common.collect.Maps;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.IndexReader;
@@ -35,10 +34,7 @@ import org.elasticsearch.search.suggest.SuggestContextParser;
 import org.elasticsearch.search.suggest.Suggester;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class CompletionSuggester extends Suggester<CompletionSuggestionContext> {
 
@@ -59,7 +55,7 @@ public class CompletionSuggester extends Suggester<CompletionSuggestionContext> 
         completionSuggestion.addTerm(completionSuggestEntry);
 
         String fieldName = suggestionContext.getField();
-        Map<String, CompletionSuggestion.Entry.Option> results = Maps.newHashMapWithExpectedSize(indexReader.leaves().size() * suggestionContext.getSize());
+        Map<String, CompletionSuggestion.Entry.Option> results = new HashMap<>(indexReader.leaves().size() * suggestionContext.getSize());
         for (LeafReaderContext atomicReaderContext : indexReader.leaves()) {
             LeafReader atomicReader = atomicReaderContext.reader();
             Terms terms = atomicReader.fields().terms(fieldName);

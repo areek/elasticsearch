@@ -19,10 +19,7 @@
 
 package org.elasticsearch.threadpool;
 
-import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Maps;
-import com.google.common.util.concurrent.MoreExecutors;
 import org.apache.lucene.util.Counter;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.component.AbstractComponent;
@@ -44,10 +41,21 @@ import org.elasticsearch.node.settings.NodeSettingsService;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Queue;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import static org.elasticsearch.common.collect.MapBuilder.newMapBuilder;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
@@ -93,6 +101,8 @@ public class ThreadPool extends AbstractComponent {
 
     private boolean settingsListenerIsSet = false;
 
+    static final Executor DIRECT_EXECUTOR = command -> command.run();
+
 
     public ThreadPool(String name) {
         this(Settings.builder().put("name", name).build());
@@ -129,7 +139,7 @@ public class ThreadPool extends AbstractComponent {
                 .put(Names.FETCH_SHARD_STORE, settingsBuilder().put("type", "scaling").put("keep_alive", "5m").put("size", availableProcessors * 2).build())
                 .build();
 
-        Map<String, ExecutorHolder> executors = Maps.newHashMap();
+        Map<String, ExecutorHolder> executors = new HashMap<>();
         for (Map.Entry<String, Settings> executor : defaultExecutorTypeSettings.entrySet()) {
             executors.put(executor.getKey(), build(executor.getKey(), groupSettings.get(executor.getKey()), executor.getValue()));
         }
@@ -142,7 +152,7 @@ public class ThreadPool extends AbstractComponent {
             executors.put(entry.getKey(), build(entry.getKey(), entry.getValue(), Settings.EMPTY));
         }
 
-        executors.put(Names.SAME, new ExecutorHolder(MoreExecutors.directExecutor(), new Info(Names.SAME, "same")));
+        executors.put(Names.SAME, new ExecutorHolder(DIRECT_EXECUTOR, new Info(Names.SAME, "same")));
         if (!executors.get(Names.GENERIC).info.getType().equals("cached")) {
             throw new IllegalArgumentException("generic thread pool must be of type cached");
         }
@@ -313,7 +323,7 @@ public class ThreadPool extends AbstractComponent {
             } else {
                 logger.debug("creating thread_pool [{}], type [{}]", name, type);
             }
-            return new ExecutorHolder(MoreExecutors.directExecutor(), new Info(name, type));
+            return new ExecutorHolder(DIRECT_EXECUTOR, new Info(name, type));
         } else if ("cached".equals(type)) {
             TimeValue defaultKeepAlive = defaultSettings.getAsTime("keep_alive", timeValueMinutes(5));
             if (previousExecutorHolder != null) {
@@ -345,7 +355,7 @@ public class ThreadPool extends AbstractComponent {
             if (previousExecutorHolder != null) {
                 if ("fixed".equals(previousInfo.getType())) {
                     SizeValue updatedQueueSize = getAsSizeOrUnbounded(settings, "capacity", getAsSizeOrUnbounded(settings, "queue", getAsSizeOrUnbounded(settings, "queue_size", previousInfo.getQueueSize())));
-                    if (Objects.equal(previousInfo.getQueueSize(), updatedQueueSize)) {
+                    if (Objects.equals(previousInfo.getQueueSize(), updatedQueueSize)) {
                         int updatedSize = settings.getAsInt("size", previousInfo.getMax());
                         if (previousInfo.getMax() != updatedSize) {
                             logger.debug("updating thread_pool [{}], type [{}], size [{}], queue_size [{}]", name, type, updatedSize, updatedQueueSize);
@@ -605,7 +615,7 @@ public class ThreadPool extends AbstractComponent {
         public final Info info;
 
         ExecutorHolder(Executor executor, Info info) {
-            assert executor instanceof EsThreadPoolExecutor || executor == MoreExecutors.directExecutor();
+            assert executor instanceof EsThreadPoolExecutor || executor == DIRECT_EXECUTOR;
             this.executor = executor;
             this.info = info;
         }

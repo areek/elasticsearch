@@ -30,6 +30,7 @@ import org.elasticsearch.action.search.SearchPhaseExecutionException;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.ShardSearchFailure;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.geo.GeoDistance;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.text.StringAndBytesText;
@@ -156,18 +157,18 @@ public class SimpleSortIT extends ESIntegTestCase {
         int docs = builders.size();
         indexRandom(true, builders);
         ensureYellow();
-        SearchResponse allDocsResponse = client().prepareSearch().setQuery(QueryBuilders.filteredQuery(matchAllQuery(),
+        SearchResponse allDocsResponse = client().prepareSearch().setQuery(
                 QueryBuilders.boolQuery().must(QueryBuilders.termQuery("foo", "bar")).must(
-                        QueryBuilders.rangeQuery("timeUpdated").gte("2014/0" + randomIntBetween(1, 7) + "/01"))))
+                        QueryBuilders.rangeQuery("timeUpdated").gte("2014/0" + randomIntBetween(1, 7) + "/01")))
                 .addSort(new FieldSortBuilder("timeUpdated").order(SortOrder.ASC).unmappedType("date"))
                 .setSize(docs).get();
         assertSearchResponse(allDocsResponse);
 
         final int numiters = randomIntBetween(1, 20);
         for (int i = 0; i < numiters; i++) {
-            SearchResponse searchResponse = client().prepareSearch().setQuery(QueryBuilders.filteredQuery(matchAllQuery(),
+            SearchResponse searchResponse = client().prepareSearch().setQuery(
                     QueryBuilders.boolQuery().must(QueryBuilders.termQuery("foo", "bar")).must(
-                            QueryBuilders.rangeQuery("timeUpdated").gte("2014/" + String.format(Locale.ROOT, "%02d", randomIntBetween(1, 7)) + "/01"))))
+                            QueryBuilders.rangeQuery("timeUpdated").gte("2014/" + String.format(Locale.ROOT, "%02d", randomIntBetween(1, 7)) + "/01")))
                     .addSort(new FieldSortBuilder("timeUpdated").order(SortOrder.ASC).unmappedType("date"))
                     .setSize(scaledRandomIntBetween(1, docs)).get();
             assertSearchResponse(searchResponse);
@@ -1661,7 +1662,7 @@ public class SimpleSortIT extends ESIntegTestCase {
         // We sort on nested field
         SearchResponse searchResponse = client().prepareSearch()
                 .setQuery(matchAllQuery())
-                .addSort("nested.foo", SortOrder.DESC)
+                .addSort(SortBuilders.fieldSort("nested.foo").setNestedPath("nested").order(SortOrder.DESC))
                 .execute().actionGet();
         assertNoFailures(searchResponse);
         SearchHit[] hits = searchResponse.getHits().hits();
@@ -1678,7 +1679,7 @@ public class SimpleSortIT extends ESIntegTestCase {
         // We sort on nested sub field
         searchResponse = client().prepareSearch()
                 .setQuery(matchAllQuery())
-                .addSort("nested.foo.sub", SortOrder.DESC)
+                .addSort(SortBuilders.fieldSort("nested.foo.sub").setNestedPath("nested").order(SortOrder.DESC))
                 .execute().actionGet();
         assertNoFailures(searchResponse);
         hits = searchResponse.getHits().hits();
@@ -1856,16 +1857,16 @@ public class SimpleSortIT extends ESIntegTestCase {
                 .addSort(geoDistanceSortBuilder.sortMode("min").order(SortOrder.ASC).geoDistance(GeoDistance.PLANE).unit(DistanceUnit.KILOMETERS))
                 .execute().actionGet();
         assertOrderedSearchHits(searchResponse, "d1", "d2");
-        assertThat((Double) searchResponse.getHits().getAt(0).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(2.5, 1, 2, 1, DistanceUnit.KILOMETERS), 1.e-5));
-        assertThat((Double) searchResponse.getHits().getAt(1).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(4.5, 1, 2, 1, DistanceUnit.KILOMETERS), 1.e-5));
+        assertThat((Double) searchResponse.getHits().getAt(0).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(2.5, 1, 2, 1, DistanceUnit.KILOMETERS), 1.e-4));
+        assertThat((Double) searchResponse.getHits().getAt(1).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(4.5, 1, 2, 1, DistanceUnit.KILOMETERS), 1.e-4));
 
         searchResponse = client().prepareSearch()
                 .setQuery(matchAllQuery())
                 .addSort(geoDistanceSortBuilder.sortMode("max").order(SortOrder.ASC).geoDistance(GeoDistance.PLANE).unit(DistanceUnit.KILOMETERS))
                 .execute().actionGet();
         assertOrderedSearchHits(searchResponse, "d1", "d2");
-        assertThat((Double) searchResponse.getHits().getAt(0).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(3.25, 4, 2, 1, DistanceUnit.KILOMETERS), 1.e-5));
-        assertThat((Double) searchResponse.getHits().getAt(1).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(5.25, 4, 2, 1, DistanceUnit.KILOMETERS), 1.e-5));
+        assertThat((Double) searchResponse.getHits().getAt(0).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(3.25, 4, 2, 1, DistanceUnit.KILOMETERS), 1.e-4));
+        assertThat((Double) searchResponse.getHits().getAt(1).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(5.25, 4, 2, 1, DistanceUnit.KILOMETERS), 1.e-4));
 
         //test all the different formats in one
         createQPoints(qHashes, qPoints);
@@ -1907,10 +1908,10 @@ public class SimpleSortIT extends ESIntegTestCase {
         searchSourceBuilder.endArray();
         searchSourceBuilder.endObject();
 
-        searchResponse = client().prepareSearch().setSource(searchSourceBuilder).execute().actionGet();
+        searchResponse = client().prepareSearch().setSource(searchSourceBuilder.bytes()).execute().actionGet();
         assertOrderedSearchHits(searchResponse, "d1", "d2");
-        assertThat((Double) searchResponse.getHits().getAt(0).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(2.5, 1, 2, 1, DistanceUnit.KILOMETERS), 1.e-5));
-        assertThat((Double) searchResponse.getHits().getAt(1).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(4.5, 1, 2, 1, DistanceUnit.KILOMETERS), 1.e-5));
+        assertThat((Double) searchResponse.getHits().getAt(0).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(2.5, 1, 2, 1, DistanceUnit.KILOMETERS), 1.e-4));
+        assertThat((Double) searchResponse.getHits().getAt(1).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(4.5, 1, 2, 1, DistanceUnit.KILOMETERS), 1.e-4));
     }
 
     public void testSinglePointGeoDistanceSort() throws ExecutionException, InterruptedException, IOException {
@@ -1956,7 +1957,7 @@ public class SimpleSortIT extends ESIntegTestCase {
                 .field("distance_type", "plane")
                 .endObject()
                 .endObject().endArray().string();
-        searchResponse = client().prepareSearch().setSource(geoSortRequest)
+        searchResponse = client().prepareSearch().setSource(new BytesArray(geoSortRequest))
                 .execute().actionGet();
         checkCorrectSortOrderForGeoSort(searchResponse);
 
@@ -1967,7 +1968,7 @@ public class SimpleSortIT extends ESIntegTestCase {
                 .field("distance_type", "plane")
                 .endObject()
                 .endObject().endArray().string();
-        searchResponse = client().prepareSearch().setSource(geoSortRequest)
+        searchResponse = client().prepareSearch().setSource(new BytesArray(geoSortRequest))
                 .execute().actionGet();
         checkCorrectSortOrderForGeoSort(searchResponse);
 
@@ -1981,15 +1982,15 @@ public class SimpleSortIT extends ESIntegTestCase {
                 .field("distance_type", "plane")
                 .endObject()
                 .endObject().endArray().string();
-        searchResponse = client().prepareSearch().setSource(geoSortRequest)
+        searchResponse = client().prepareSearch().setSource(new BytesArray(geoSortRequest))
                 .execute().actionGet();
         checkCorrectSortOrderForGeoSort(searchResponse);
     }
 
     private void checkCorrectSortOrderForGeoSort(SearchResponse searchResponse) {
         assertOrderedSearchHits(searchResponse, "d2", "d1");
-        assertThat((Double) searchResponse.getHits().getAt(0).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(2, 2, 1, 2, DistanceUnit.KILOMETERS), 1.e-5));
-        assertThat((Double) searchResponse.getHits().getAt(1).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(2, 2, 1, 1, DistanceUnit.KILOMETERS), 1.e-5));
+        assertThat((Double) searchResponse.getHits().getAt(0).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(2, 2, 1, 2, DistanceUnit.KILOMETERS), 1.e-4));
+        assertThat((Double) searchResponse.getHits().getAt(1).getSortValues()[0], closeTo(GeoDistance.PLANE.calculate(2, 2, 1, 1, DistanceUnit.KILOMETERS), 1.e-4));
     }
 
     protected void createQPoints(List<String> qHashes, List<GeoPoint> qPoints) {

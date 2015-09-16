@@ -33,8 +33,7 @@ import org.elasticsearch.action.support.broadcast.BroadcastRequest;
  */
 public class RefreshRequest extends BroadcastRequest<RefreshRequest> {
 
-
-    RefreshRequest() {
+    public RefreshRequest() {
     }
 
     /**
@@ -48,5 +47,4 @@ public class RefreshRequest extends BroadcastRequest<RefreshRequest> {
     public RefreshRequest(String... indices) {
         super(indices);
     }
-
 }

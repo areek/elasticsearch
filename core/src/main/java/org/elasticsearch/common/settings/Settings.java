@@ -19,12 +19,8 @@
 
 package org.elasticsearch.common.settings;
 
-import com.google.common.base.Charsets;
-import com.google.common.base.Predicate;
+import java.nio.charset.StandardCharsets;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSortedMap;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Maps;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Booleans;
 import org.elasticsearch.common.Strings;
@@ -34,12 +30,7 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.property.PropertyPlaceholder;
 import org.elasticsearch.common.settings.loader.SettingsLoader;
 import org.elasticsearch.common.settings.loader.SettingsLoaderFactory;
-import org.elasticsearch.common.unit.ByteSizeUnit;
-import org.elasticsearch.common.unit.ByteSizeValue;
-import org.elasticsearch.common.unit.MemorySizeValue;
-import org.elasticsearch.common.unit.RatioValue;
-import org.elasticsearch.common.unit.SizeValue;
-import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.common.unit.*;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 
@@ -48,17 +39,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -89,13 +70,12 @@ public final class Settings implements ToXContent {
         return settingsRequireUnits;
     }
 
-    private ImmutableMap<String, String> settings;
+    private SortedMap<String, String> settings;
     private final ImmutableMap<String, String> forcedUnderscoreSettings;
 
     Settings(Map<String, String> settings) {
         // we use a sorted map for consistent serialization when using getAsMap()
-        // TODO: use Collections.unmodifiableMap with a TreeMap
-        this.settings = ImmutableSortedMap.copyOf(settings);
+        this.settings = Collections.unmodifiableSortedMap(new TreeMap<>(settings));
         Map<String, String> forcedUnderscoreSettings = null;
         for (Map.Entry<String, String> entry : settings.entrySet()) {
             String toUnderscoreCase = Strings.toUnderscoreCase(entry.getKey());
@@ -111,16 +91,17 @@ public final class Settings implements ToXContent {
 
     /**
      * The settings as a flat {@link java.util.Map}.
+     * @return an unmodifiable map of settings
      */
-    public ImmutableMap<String, String> getAsMap() {
-        return this.settings;
+    public Map<String, String> getAsMap() {
+        return Collections.unmodifiableMap(this.settings);
     }
 
     /**
      * The settings as a structured {@link java.util.Map}.
      */
     public Map<String, Object> getAsStructuredMap() {
-        Map<String, Object> map = Maps.newHashMapWithExpectedSize(2);
+        Map<String, Object> map = new HashMap<>(2);
         for (Map.Entry<String, String> entry : settings.entrySet()) {
             processSetting(map, "", entry.getKey(), entry.getValue());
         }
@@ -150,7 +131,7 @@ public final class Settings implements ToXContent {
             String rest = setting.substring(prefixLength + 1);
             Object existingValue = map.get(prefix + key);
             if (existingValue == null) {
-                Map<String, Object> newMap = Maps.newHashMapWithExpectedSize(2);
+                Map<String, Object> newMap = new HashMap<>(2);
                 processSetting(newMap, "", rest, value);
                 map.put(key, newMap);
             } else {
@@ -1014,7 +995,7 @@ public final class Settings implements ToXContent {
                 final Matcher matcher = ARRAY_PATTERN.matcher(entry.getKey());
                 if (matcher.matches()) {
                     prefixesToRemove.add(matcher.group(1));
-                } else if (Iterables.any(map.keySet(), startsWith(entry.getKey() + "."))) {
+                } else if (map.keySet().stream().anyMatch(key -> key.startsWith(entry.getKey() + "."))) {
                     prefixesToRemove.add(entry.getKey());
                 }
             }
@@ -1085,7 +1066,7 @@ public final class Settings implements ToXContent {
         public Builder loadFromStream(String resourceName, InputStream is) throws SettingsException {
             SettingsLoader settingsLoader = SettingsLoaderFactory.loaderFromResource(resourceName);
             try {
-                Map<String, String> loadedSettings = settingsLoader.load(Streams.copyToString(new InputStreamReader(is, Charsets.UTF_8)));
+                Map<String, String> loadedSettings = settingsLoader.load(Streams.copyToString(new InputStreamReader(is, StandardCharsets.UTF_8)));
                 put(loadedSettings);
             } catch (Exception e) {
                 throw new SettingsException("Failed to load settings from [" + resourceName + "]", e);
@@ -1183,7 +1164,7 @@ public final class Settings implements ToXContent {
                         return true;
                     }
                 };
-            for (Map.Entry<String, String> entry : Maps.newHashMap(map).entrySet()) {
+            for (Map.Entry<String, String> entry : new HashMap<>(map).entrySet()) {
                 String value = propertyPlaceholder.replacePlaceholders(entry.getValue(), placeholderResolver);
                 // if the values exists and has length, we should maintain it  in the map
                 // otherwise, the replace process resolved into removing it
@@ -1202,7 +1183,7 @@ public final class Settings implements ToXContent {
          * If a setting doesn't start with the prefix, the builder appends the prefix to such setting.
          */
         public Builder normalizePrefix(String prefix) {
-            Map<String, String> replacements = Maps.newHashMap();
+            Map<String, String> replacements = new HashMap<>();
             Iterator<Map.Entry<String, String>> iterator = map.entrySet().iterator();
             while(iterator.hasNext()) {
                 Map.Entry<String, String> entry = iterator.next();
@@ -1221,24 +1202,6 @@ public final class Settings implements ToXContent {
          */
         public Settings build() {
             return new Settings(Collections.unmodifiableMap(map));
-        }
-    }
-
-    private static StartsWithPredicate startsWith(String prefix) {
-        return new StartsWithPredicate(prefix);
-    }
-
-    private static final class StartsWithPredicate implements Predicate<String> {
-
-        private String prefix;
-
-        public StartsWithPredicate(String prefix) {
-            this.prefix = prefix;
-        }
-
-        @Override
-        public boolean apply(String input) {
-            return input.startsWith(prefix);
         }
     }
 }

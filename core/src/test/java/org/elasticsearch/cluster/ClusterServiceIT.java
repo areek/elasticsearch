@@ -18,8 +18,6 @@
  */
 package org.elasticsearch.cluster;
 
-import com.google.common.base.Predicate;
-import com.google.common.util.concurrent.ListenableFuture;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
@@ -38,6 +36,7 @@ import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
+import org.elasticsearch.test.InternalTestCluster;
 import org.elasticsearch.test.MockLogAppender;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -68,6 +67,11 @@ import static org.hamcrest.Matchers.notNullValue;
 @ClusterScope(scope = Scope.TEST, numDataNodes = 0)
 @ESIntegTestCase.SuppressLocalMode
 public class ClusterServiceIT extends ESIntegTestCase {
+
+    @Override
+    protected Collection<Class<? extends Plugin>> nodePlugins() {
+        return pluginList(TestPlugin.class);
+    }
 
     @Test
     public void testTimeoutUpdateTask() throws Exception {
@@ -293,8 +297,8 @@ public class ClusterServiceIT extends ESIntegTestCase {
                 .put("discovery.type", "local")
                 .build();
 
-        ListenableFuture<String> master = internalCluster().startNodeAsync(settings);
-        ListenableFuture<String> nonMaster = internalCluster().startNodeAsync(settingsBuilder().put(settings).put("node.master", false).build());
+        InternalTestCluster.Async<String> master = internalCluster().startNodeAsync(settings);
+        InternalTestCluster.Async<String> nonMaster = internalCluster().startNodeAsync(settingsBuilder().put(settings).put("node.master", false).build());
         master.get();
         ensureGreen(); // make sure we have a cluster
 
@@ -565,12 +569,7 @@ public class ClusterServiceIT extends ESIntegTestCase {
         invoked2.await();
 
         // whenever we test for no tasks, we need to awaitBusy since this is a live node
-        assertTrue(awaitBusy(new Predicate<Object>() {
-            @Override
-            public boolean apply(Object input) {
-                return clusterService.pendingTasks().isEmpty();
-            }
-        }));
+        assertTrue(awaitBusy(() -> clusterService.pendingTasks().isEmpty()));
         waitNoPendingTasksOnAll();
 
         final CountDownLatch block2 = new CountDownLatch(1);
@@ -637,7 +636,6 @@ public class ClusterServiceIT extends ESIntegTestCase {
                 .put("discovery.zen.minimum_master_nodes", 1)
                 .put("discovery.zen.ping_timeout", "400ms")
                 .put("discovery.initial_state_timeout", "500ms")
-                .put("plugin.types", TestPlugin.class.getName())
                 .build();
 
         String node_0 = internalCluster().startNode(settings);
@@ -684,12 +682,7 @@ public class ClusterServiceIT extends ESIntegTestCase {
         internalCluster().stopRandomNonMasterNode();
 
         // there should not be any master as the minimum number of required eligible masters is not met
-        awaitBusy(new Predicate<Object>() {
-            @Override
-            public boolean apply(Object obj) {
-                return clusterService1.state().nodes().masterNode() == null && clusterService1.state().status() == ClusterState.ClusterStateStatus.APPLIED;
-            }
-        });
+        awaitBusy(() -> clusterService1.state().nodes().masterNode() == null && clusterService1.state().status() == ClusterState.ClusterStateStatus.APPLIED);
         assertThat(testService1.master(), is(false));
 
         // bring the node back up

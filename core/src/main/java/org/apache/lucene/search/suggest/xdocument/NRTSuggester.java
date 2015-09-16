@@ -18,6 +18,7 @@ package org.apache.lucene.search.suggest.xdocument;
  */
 
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -28,14 +29,11 @@ import org.apache.lucene.store.ByteArrayDataInput;
 import org.apache.lucene.store.ByteArrayDataOutput;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Accountable;
+import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.CharsRefBuilder;
-import org.apache.lucene.util.fst.ByteSequenceOutputs;
-import org.apache.lucene.util.fst.FST;
-import org.apache.lucene.util.fst.PairOutputs;
+import org.apache.lucene.util.fst.*;
 import org.apache.lucene.util.fst.PairOutputs.Pair;
-import org.apache.lucene.util.fst.PositiveIntOutputs;
-import org.apache.lucene.util.fst.XUtil;
 
 import static org.apache.lucene.search.suggest.xdocument.NRTSuggester.PayLoadProcessor.parseDocID;
 import static org.apache.lucene.search.suggest.xdocument.NRTSuggester.PayLoadProcessor.parseSurfaceForm;
@@ -125,7 +123,7 @@ public final class NRTSuggester implements Accountable {
    * and query boost to filter and score the entry, before being collected via
    * {@link TopSuggestDocsCollector#collect(int, CharSequence, CharSequence, float)}
    */
-  public void lookup(final CompletionScorer scorer, final TopSuggestDocsCollector collector) throws IOException {
+  public void lookup(final CompletionScorer scorer, final Bits acceptDocs, final TopSuggestDocsCollector collector) throws IOException {
     final double liveDocsRatio = calculateLiveDocRatio(scorer.reader.numDocs(), scorer.reader.maxDoc());
     if (liveDocsRatio == -1) {
       return;
@@ -143,7 +141,7 @@ public final class NRTSuggester implements Accountable {
       protected boolean acceptResult(XUtil.FSTPath<Pair<Long, BytesRef>> path) {
         int payloadSepIndex = parseSurfaceForm(path.cost.output2, payloadSep, spare);
         int docID = parseDocID(path.cost.output2, payloadSepIndex);
-        if (!scorer.accept(docID)) {
+        if (!scorer.accept(docID, acceptDocs)) {
           return false;
         }
         try {
@@ -158,7 +156,8 @@ public final class NRTSuggester implements Accountable {
 
     for (FSTUtil.Path<Pair<Long, BytesRef>> path : prefixPaths) {
       scorer.weight.setNextMatch(path.input.get());
-      searcher.addStartPaths(path.fstNode, path.output, false, path.input, scorer.weight.boost(), scorer.weight.context());
+      searcher.addStartPaths(path.fstNode, path.output, false, path.input, scorer.weight.boost(),
+              scorer.weight.context());
     }
     // hits are also returned by search()
     // we do not use it, instead collect at acceptResult
