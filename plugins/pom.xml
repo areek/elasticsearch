@@ -7,7 +7,7 @@
 
     <groupId>org.elasticsearch.plugin</groupId>
     <artifactId>plugins</artifactId>
-    <version>2.1.0-SNAPSHOT</version>
+    <version>2.2.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>Plugin: Parent POM</name>
     <inceptionYear>2009</inceptionYear>
@@ -16,7 +16,7 @@
     <parent>
         <groupId>org.elasticsearch</groupId>
         <artifactId>parent</artifactId>
-        <version>2.1.0-SNAPSHOT</version>
+        <version>2.2.0-SNAPSHOT</version>
     </parent>
 
     <properties>
@@ -104,11 +104,6 @@
             <scope>provided</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.lucene</groupId>
-            <artifactId>lucene-expressions</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
             <groupId>com.spatial4j</groupId>
             <artifactId>spatial4j</artifactId>
             <scope>provided</scope>
@@ -184,12 +179,6 @@
             <scope>provided</scope>
         </dependency>
         <dependency>
-            <groupId>org.codehaus.groovy</groupId>
-            <artifactId>groovy-all</artifactId>
-            <classifier>indy</classifier>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
             <groupId>log4j</groupId>
             <artifactId>log4j</artifactId>
             <scope>provided</scope>
@@ -241,6 +230,9 @@
                     <!-- used in plugin REST tests -->
                     <include>api/index.json</include>
                     <include>api/get.json</include>
+                    <include>api/get_script.json</include>
+                    <include>api/put_script.json</include>
+                    <include>api/delete_script.json</include>
                     <include>api/update.json</include>
                     <include>api/search.json</include>
                     <include>api/indices.analyze.json</include>
@@ -258,9 +250,41 @@
                 <directory>${elasticsearch.tools.directory}/shared-test-resources</directory>
                 <filtering>false</filtering>
             </testResource>
+            <!-- plugin metadata as a test resource -->
+            <testResource>
+                <directory>${basedir}/target/metadata-test-resources</directory>
+                <filtering>false</filtering>
+            </testResource>
         </testResources>
 
         <plugins>
+           <!-- we don't have a proper .zip plugin structure for tests, but we need the metadata as test resource -->
+           <plugin>
+              <artifactId>maven-resources-plugin</artifactId>
+              <executions>
+                  <execution>
+                      <id>copy-resources</id>
+                      <!-- process-resources makes more sense, but is not done by e.g. mvn eclipse:eclipse! -->
+                      <phase>generate-resources</phase>
+                      <goals>
+                          <goal>copy-resources</goal>
+                      </goals>
+                      <configuration>
+                          <outputDirectory>${basedir}/target/metadata-test-resources</outputDirectory>
+                          <resources>
+                              <resource>
+                                  <directory>src/main/plugin-metadata</directory>
+                                  <filtering>false</filtering>
+                              </resource>
+                              <resource>
+                                  <directory>${elasticsearch.tools.directory}/plugin-metadata</directory>
+                                  <filtering>true</filtering>
+                              </resource>
+                          </resources>
+                      </configuration>
+                  </execution>
+              </executions>
+           </plugin>
            <!-- integration tests -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
@@ -400,8 +424,10 @@
         <module>cloud-aws</module>
         <module>delete-by-query</module>
         <module>discovery-multicast</module>
-        <module>lang-python</module>
+        <module>lang-expression</module>
+        <module>lang-groovy</module>
         <module>lang-javascript</module>
+        <module>lang-python</module>
         <module>mapper-murmur3</module>
         <module>mapper-size</module>
         <module>jvm-example</module>

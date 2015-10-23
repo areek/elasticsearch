@@ -43,6 +43,8 @@ OFFICIAL PLUGINS
     - cloud-gce
     - delete-by-query
     - discovery-multicast
+    - lang-expression
+    - lang-groovy
     - lang-javascript
     - lang-python
     - mapper-murmur3
@@ -56,3 +58,5 @@ OPTIONS
     -v,--verbose                 Verbose output
 
     -h,--help                    Shows this message
+    
+    -b,--batch                   Enable batch mode explicitly, automatic confirmation of security permissions

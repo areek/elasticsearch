@@ -71,7 +71,7 @@ public class JarHell {
     }
 
     /**
-     * Checks the current classloader for duplicate classes
+     * Checks the current classpath for duplicate classes
      * @throws IllegalStateException if jar hell was found
      */
     public static void checkJarHell() throws Exception {

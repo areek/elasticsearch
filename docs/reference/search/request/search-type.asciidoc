@@ -75,8 +75,6 @@ API as it provides more options.
 [[scan]]
 ==== Scan
 
-deprecated[2.1.0, `scan` does not provide any benefits over a regular `scroll` request sorted by `_doc`]
-
 Parameter value: *scan*.
 
 The `scan` search type disables sorting in order to allow very efficient

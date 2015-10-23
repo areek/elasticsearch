@@ -92,25 +92,31 @@ public class Ec2NameResolver extends AbstractComponent implements CustomNameReso
      * @throws IOException if ec2 meta-data cannot be obtained.
      * @see CustomNameResolver#resolveIfPossible(String)
      */
-    public InetAddress[] resolve(Ec2HostnameType type) throws IOException {
+    public InetAddress[] resolve(Ec2HostnameType type, boolean warnOnFailure) {
+        URLConnection urlConnection = null;
         InputStream in = null;
-        String metadataUrl = AwsEc2ServiceImpl.EC2_METADATA_URL + type.ec2Name;
         try {
-            URL url = new URL(metadataUrl);
+            URL url = new URL(AwsEc2ServiceImpl.EC2_METADATA_URL + type.ec2Name);
             logger.debug("obtaining ec2 hostname from ec2 meta-data url {}", url);
-            URLConnection urlConnection = url.openConnection();
+            urlConnection = url.openConnection();
             urlConnection.setConnectTimeout(2000);
             in = urlConnection.getInputStream();
             BufferedReader urlReader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
 
             String metadataResult = urlReader.readLine();
             if (metadataResult == null || metadataResult.length() == 0) {
-                throw new IOException("no gce metadata returned from [" + url + "] for [" + type.configName + "]");
+                logger.error("no ec2 metadata returned from {}", url);
+                return null;
             }
             // only one address: because we explicitly ask for only one via the Ec2HostnameType
             return new InetAddress[] { InetAddress.getByName(metadataResult) };
         } catch (IOException e) {
-            throw new IOException("IOException caught when fetching InetAddress from [" + metadataUrl + "]", e);
+            if (warnOnFailure) {
+                logger.warn("failed to get metadata for [" + type.configName + "]", e);
+            } else {
+                logger.debug("failed to get metadata for [" + type.configName + "]", e);
+            }
+            return null;
         } finally {
             IOUtils.closeWhileHandlingException(in);
         }
@@ -123,10 +129,10 @@ public class Ec2NameResolver extends AbstractComponent implements CustomNameReso
     }
 
     @Override
-    public InetAddress[] resolveIfPossible(String value) throws IOException {
+    public InetAddress[] resolveIfPossible(String value) {
         for (Ec2HostnameType type : Ec2HostnameType.values()) {
             if (type.configName.equals(value)) {
-                return resolve(type);
+                return resolve(type, true);
             }
         }
         return null;

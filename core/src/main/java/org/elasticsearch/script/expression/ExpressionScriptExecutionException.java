@@ -26,7 +26,9 @@ import java.io.IOException;
 
 /**
  * Exception used to wrap exceptions occuring while running expressions.
+ * @deprecated just for backwards compatibility
  */
+@Deprecated
 public class ExpressionScriptExecutionException extends ElasticsearchException {
     public ExpressionScriptExecutionException(String msg, Throwable cause) {
         super(msg, cause);

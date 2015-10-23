@@ -27,10 +27,14 @@ import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.common.collect.HppcMaps;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.support.QueryInnerHitBuilder;
+import org.elasticsearch.plugins.Plugin;
+import org.elasticsearch.script.MockScriptEngine;
 import org.elasticsearch.script.Script;
+import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.fetch.innerhits.InnerHitsBuilder;
@@ -40,6 +44,8 @@ import org.elasticsearch.test.ESIntegTestCase;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -51,6 +57,11 @@ import static org.hamcrest.Matchers.*;
 /**
  */
 public class InnerHitsIT extends ESIntegTestCase {
+
+    @Override
+    protected Collection<Class<? extends Plugin>> nodePlugins() {
+        return pluginList(MockScriptEngine.TestPlugin.class);
+    }
 
     @Test
     public void testSimpleNested() throws Exception {
@@ -139,7 +150,12 @@ public class InnerHitsIT extends ESIntegTestCase {
             assertThat(innerHits.getAt(2).getNestedIdentity().getField().string(), equalTo("comments"));
             assertThat(innerHits.getAt(2).getNestedIdentity().getOffset(), equalTo(2));
         }
-
+        InnerHitsBuilder.InnerHit innerHit = new InnerHitsBuilder.InnerHit();
+        innerHit.highlightBuilder().field("comments.message");
+        innerHit.setExplain(true);
+        innerHit.addFieldDataField("comments.message");
+        innerHit.addScriptField("script", new Script("5", ScriptService.ScriptType.INLINE, MockScriptEngine.NAME, Collections.<String, Object>emptyMap()));
+        innerHit.setSize(1);
         searchRequests = new SearchRequest[] {
                 client().prepareSearch("articles")
                         .setQuery(nestedQuery("comments", matchQuery("comments.message", "fox")))
@@ -148,14 +164,14 @@ public class InnerHitsIT extends ESIntegTestCase {
                                 .addHighlightedField("comments.message")
                                 .setExplain(true)
                                 .addFieldDataField("comments.message")
-                                        .addScriptField("script", new Script("doc['comments.message'].value"))
+                                .addScriptField("script", new Script("5", ScriptService.ScriptType.INLINE, MockScriptEngine.NAME, Collections.<String, Object>emptyMap()))
                                 .setSize(1)).request(),
                 client().prepareSearch("articles")
                         .setQuery(nestedQuery("comments", matchQuery("comments.message", "fox")).innerHit(new QueryInnerHitBuilder()
                                 .addHighlightedField("comments.message")
                                 .setExplain(true)
                                 .addFieldDataField("comments.message")
-                                                .addScriptField("script", new Script("doc['comments.message'].value"))
+                                                .addScriptField("script", new Script("5", ScriptService.ScriptType.INLINE, MockScriptEngine.NAME, Collections.<String, Object>emptyMap()))
                                 .setSize(1))).request()
         };
 
@@ -168,7 +184,7 @@ public class InnerHitsIT extends ESIntegTestCase {
             assertThat(innerHits.getAt(0).getHighlightFields().get("comments.message").getFragments()[0].string(), equalTo("<em>fox</em> eat quick"));
             assertThat(innerHits.getAt(0).explanation().toString(), containsString("weight(comments.message:fox in"));
             assertThat(innerHits.getAt(0).getFields().get("comments.message").getValue().toString(), equalTo("eat"));
-            assertThat(innerHits.getAt(0).getFields().get("script").getValue().toString(), equalTo("eat"));
+            assertThat(innerHits.getAt(0).getFields().get("script").getValue().toString(), equalTo("5"));
         }
     }
 
@@ -317,6 +333,12 @@ public class InnerHitsIT extends ESIntegTestCase {
             assertThat(innerHits.getAt(2).getId(), equalTo("6"));
             assertThat(innerHits.getAt(2).type(), equalTo("comment"));
         }
+        InnerHitsBuilder.InnerHit innerHit = new InnerHitsBuilder.InnerHit();
+        innerHit.highlightBuilder().field("message");
+        innerHit.setExplain(true);
+        innerHit.addFieldDataField("message");
+        innerHit.addScriptField("script", new Script("5", ScriptService.ScriptType.INLINE, MockScriptEngine.NAME, Collections.<String, Object>emptyMap()));
+        innerHit.setSize(1);
 
         searchRequests = new SearchRequest[] {
                 client().prepareSearch("articles")
@@ -326,14 +348,14 @@ public class InnerHitsIT extends ESIntegTestCase {
                                         .addHighlightedField("message")
                                         .setExplain(true)
                                         .addFieldDataField("message")
-                                        .addScriptField("script", new Script("doc['message'].value"))
+                                        .addScriptField("script", new Script("5", ScriptService.ScriptType.INLINE, MockScriptEngine.NAME, Collections.<String, Object>emptyMap()))
                                         .setSize(1)
                         ).request(),
                 client().prepareSearch("articles")
                         .setQuery(
                                 hasChildQuery("comment", matchQuery("message", "fox")).innerHit(
                                         new QueryInnerHitBuilder().addHighlightedField("message").setExplain(true)
-                                                .addFieldDataField("message").addScriptField("script", new Script("doc['message'].value"))
+                                                .addFieldDataField("message").addScriptField("script", new Script("5", ScriptService.ScriptType.INLINE, MockScriptEngine.NAME, Collections.<String, Object>emptyMap()))
                                                 .setSize(1))).request() };
 
         for (SearchRequest searchRequest : searchRequests) {
@@ -344,7 +366,7 @@ public class InnerHitsIT extends ESIntegTestCase {
             assertThat(innerHits.getAt(0).getHighlightFields().get("message").getFragments()[0].string(), equalTo("<em>fox</em> eat quick"));
             assertThat(innerHits.getAt(0).explanation().toString(), containsString("weight(message:fox"));
             assertThat(innerHits.getAt(0).getFields().get("message").getValue().toString(), equalTo("eat"));
-            assertThat(innerHits.getAt(0).getFields().get("script").getValue().toString(), equalTo("eat"));
+            assertThat(innerHits.getAt(0).getFields().get("script").getValue().toString(), equalTo("5"));
         }
     }
 
@@ -650,9 +672,9 @@ public class InnerHitsIT extends ESIntegTestCase {
         response = client().prepareSearch("articles")
                 .setQuery(nestedQuery("comments", nestedQuery("comments.remarks", matchQuery("comments.remarks.message", "bad"))))
                 .addInnerHit("comment", new InnerHitsBuilder.InnerHit()
-                                .setPath("comments")
-                                .setQuery(nestedQuery("comments.remarks", matchQuery("comments.remarks.message", "bad")))
-                                .addInnerHit("remark", new InnerHitsBuilder.InnerHit().setPath("comments.remarks").setQuery(matchQuery("comments.remarks.message", "bad"))))
+                        .setPath("comments")
+                        .setQuery(nestedQuery("comments.remarks", matchQuery("comments.remarks.message", "bad")))
+                        .addInnerHit("remark", new InnerHitsBuilder.InnerHit().setPath("comments.remarks").setQuery(matchQuery("comments.remarks.message", "bad"))))
                 .get();
         assertNoFailures(response);
         assertHitCount(response, 1);
@@ -741,17 +763,17 @@ public class InnerHitsIT extends ESIntegTestCase {
     @Test
     public void testNestedInnerHitsWithHighlightOnStoredFieldBackcompat() throws Exception {
         assertAcked(prepareCreate("articles")
-                .setSettings(IndexMetaData.SETTING_VERSION_CREATED, Version.V_1_4_2.id)
+                        .setSettings(IndexMetaData.SETTING_VERSION_CREATED, Version.V_1_4_2.id)
                         .addMapping("article", jsonBuilder().startObject()
                                         .startObject("_source").field("enabled", false).endObject()
-                                            .startObject("properties")
-                                                .startObject("comments")
-                                                    .field("type", "nested")
-                                                    .startObject("properties")
-                                                        .startObject("message").field("type", "string").field("store", "yes").endObject()
-                                                    .endObject()
-                                                .endObject()
-                                            .endObject()
+                                        .startObject("properties")
+                                        .startObject("comments")
+                                        .field("type", "nested")
+                                        .startObject("properties")
+                                        .startObject("message").field("type", "string").field("store", "yes").endObject()
+                                        .endObject()
+                                        .endObject()
+                                        .endObject()
                                         .endObject()
                         )
         );
@@ -783,13 +805,13 @@ public class InnerHitsIT extends ESIntegTestCase {
                         .addMapping("article", jsonBuilder().startObject()
                                         .startObject("_source").field("excludes", new String[]{"comments"}).endObject()
                                         .startObject("properties")
-                                            .startObject("comments")
-                                                .field("type", "nested")
-                                                .startObject("properties")
-                                                    .startObject("message").field("type", "string").field("store", "yes").endObject()
-                                                .endObject()
-                                                .endObject()
-                                            .endObject()
+                                        .startObject("comments")
+                                        .field("type", "nested")
+                                        .startObject("properties")
+                                        .startObject("message").field("type", "string").field("store", "yes").endObject()
+                                        .endObject()
+                                        .endObject()
+                                        .endObject()
                                         .endObject()
                         )
         );
@@ -960,7 +982,7 @@ public class InnerHitsIT extends ESIntegTestCase {
                 )
                 .addInnerHit("princes",
                         new InnerHitsBuilder.InnerHit().setType("prince")
-                        .addInnerHit("kings", new InnerHitsBuilder.InnerHit().setType("king"))
+                                .addInnerHit("kings", new InnerHitsBuilder.InnerHit().setType("king"))
                 )
                 .get();
         assertHitCount(response, 1);

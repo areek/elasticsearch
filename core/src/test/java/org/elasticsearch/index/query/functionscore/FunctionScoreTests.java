@@ -301,7 +301,7 @@ public class FunctionScoreTests extends ESTestCase {
         functionScoreQuery.setCombineFunction(CombineFunction.AVG);
         Weight weight = searcher.createNormalizedWeight(functionScoreQuery, true);
         Explanation explanation = weight.explain(searcher.getIndexReader().leaves().get(0), 0);
-        return explanation.getDetails()[0].getDetails()[1];
+        return explanation.getDetails()[1];
     }
 
     public void checkFunctionScoreExplanation(Explanation randomExplanation, String functionExpl) {

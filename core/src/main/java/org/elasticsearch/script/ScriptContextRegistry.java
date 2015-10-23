@@ -24,6 +24,8 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -36,7 +38,7 @@ public final class ScriptContextRegistry {
 
     private final ImmutableMap<String, ScriptContext> scriptContexts;
 
-    ScriptContextRegistry(Iterable<ScriptContext.Plugin> customScriptContexts) {
+    public ScriptContextRegistry(Iterable<ScriptContext.Plugin> customScriptContexts) {
         Map<String, ScriptContext> scriptContexts = Maps.newHashMap();
         for (ScriptContext.Standard scriptContext : ScriptContext.Standard.values()) {
             scriptContexts.put(scriptContext.getKey(), scriptContext);

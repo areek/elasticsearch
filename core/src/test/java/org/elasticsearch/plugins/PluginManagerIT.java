@@ -635,6 +635,8 @@ public class PluginManagerIT extends ESIntegTestCase {
         PluginManager.checkForOfficialPlugins("cloud-azure");
         PluginManager.checkForOfficialPlugins("cloud-gce");
         PluginManager.checkForOfficialPlugins("delete-by-query");
+        PluginManager.checkForOfficialPlugins("lang-expression");
+        PluginManager.checkForOfficialPlugins("lang-groovy");
         PluginManager.checkForOfficialPlugins("lang-javascript");
         PluginManager.checkForOfficialPlugins("lang-python");
         PluginManager.checkForOfficialPlugins("mapper-murmur3");

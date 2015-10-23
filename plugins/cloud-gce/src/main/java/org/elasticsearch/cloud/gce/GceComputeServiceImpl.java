@@ -32,6 +32,8 @@ import com.google.api.services.compute.model.Instance;
 import com.google.api.services.compute.model.InstanceList;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
+
+import org.elasticsearch.SpecialPermission;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.cloud.gce.network.GceNameResolver;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
@@ -40,6 +42,7 @@ import org.elasticsearch.common.network.NetworkService;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.util.CollectionUtils;
+import org.elasticsearch.discovery.gce.RetryHttpInitializerWrapper;
 
 import java.io.IOException;
 import java.net.URL;
@@ -52,6 +55,8 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.elasticsearch.common.util.CollectionUtils.eagerTransform;
+import java.security.PrivilegedActionException;
+import java.util.*;
 
 /**
  *
@@ -70,21 +75,31 @@ public class GceComputeServiceImpl extends AbstractLifecycleComponent<GceCompute
 
     @Override
     public Collection<Instance> instances() {
-
             logger.debug("get instances for project [{}], zones [{}]", project, zones);
 
             List<List<Instance>> instanceListByZone = eagerTransform(zones, new Function<String, List<Instance>>() {
                 @Override
-                public List<Instance> apply(String zoneId) {
+                public List<Instance> apply(final String zoneId) {
                     try {
-                        Compute.Instances.List list = client().instances().list(project, zoneId);
-                        InstanceList instanceList = list.execute();
+                        // hack around code messiness in GCE code
+                        // TODO: get this fixed
+                        SecurityManager sm = System.getSecurityManager();
+                        if (sm != null) {
+                            sm.checkPermission(new SpecialPermission());
+                        }
+                        InstanceList instanceList = AccessController.doPrivileged(new PrivilegedExceptionAction<InstanceList>() {
+                            @Override
+                            public InstanceList run() throws Exception {
+                                Compute.Instances.List list = client().instances().list(project, zoneId);
+                                return list.execute();
+                            }
+                        });
                         if (instanceList.isEmpty()) {
                             return Collections.EMPTY_LIST;
                         }
 
                         return instanceList.getItems();
-                    } catch (IOException e) {
+                    } catch (PrivilegedActionException e) {
                         logger.warn("Problem fetching instance list for zone {}", zoneId);
                         logger.debug("Full exception:", e);
 
@@ -174,22 +189,48 @@ public class GceComputeServiceImpl extends AbstractLifecycleComponent<GceCompute
             gceJsonFactory = new JacksonFactory();
 
             logger.info("starting GCE discovery service");
-            ComputeCredential credential = new ComputeCredential.Builder(getGceHttpTransport(), gceJsonFactory)
+            final ComputeCredential credential = new ComputeCredential.Builder(getGceHttpTransport(), gceJsonFactory)
                         .setTokenServerEncodedUrl(TOKEN_SERVER_ENCODED_URL)
                     .build();
 
-            credential.refreshToken();
+            // hack around code messiness in GCE code
+            // TODO: get this fixed
+            SecurityManager sm = System.getSecurityManager();
+            if (sm != null) {
+                sm.checkPermission(new SpecialPermission());
+            }
+            AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
+                @Override
+                public Void run() throws IOException {
+                    credential.refreshToken();
+                    return null;
+                }
+            });
 
             logger.debug("token [{}] will expire in [{}] s", credential.getAccessToken(), credential.getExpiresInSeconds());
             if (credential.getExpiresInSeconds() != null) {
                 refreshInterval = TimeValue.timeValueSeconds(credential.getExpiresInSeconds()-1);
             }
 
-            // Once done, let's use this token
-            this.client = new Compute.Builder(getGceHttpTransport(), gceJsonFactory, null)
-                    .setApplicationName(Fields.VERSION)
-                    .setHttpRequestInitializer(credential)
-                    .build();
+            boolean ifRetry = settings.getAsBoolean(Fields.RETRY, true);
+            Compute.Builder builder = new Compute.Builder(getGceHttpTransport(), gceJsonFactory, null)
+                    .setApplicationName(Fields.VERSION);
+
+            if (ifRetry) {
+                int maxWait = settings.getAsInt(Fields.MAXWAIT, -1);
+                RetryHttpInitializerWrapper retryHttpInitializerWrapper;
+                if (maxWait > 0) {
+                    retryHttpInitializerWrapper = new RetryHttpInitializerWrapper(credential, maxWait);
+                } else {
+                    retryHttpInitializerWrapper = new RetryHttpInitializerWrapper(credential);
+                }
+                builder.setHttpRequestInitializer(retryHttpInitializerWrapper);
+
+            } else {
+                builder.setHttpRequestInitializer(credential);
+            }
+
+            this.client = builder.build();
         } catch (Exception e) {
             logger.warn("unable to start GCE discovery service", e);
             throw new IllegalArgumentException("unable to start GCE discovery service", e);

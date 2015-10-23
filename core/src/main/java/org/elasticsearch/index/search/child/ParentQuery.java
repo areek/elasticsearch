@@ -21,6 +21,7 @@ package org.elasticsearch.index.search.child;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.BitsFilteredDocIdSet;
 import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.CollectionTerminatedException;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.DocIdSet;
 import org.apache.lucene.search.DocIdSetIterator;
@@ -31,13 +32,12 @@ import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Weight;
-import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.SuppressForbidden;
 import org.apache.lucene.util.ToStringUtils;
 import org.elasticsearch.common.lease.Releasable;
 import org.elasticsearch.common.lease.Releasables;
 import org.elasticsearch.common.lucene.IndexCacheableQuery;
 import org.elasticsearch.common.lucene.Lucene;
-import org.elasticsearch.common.lucene.search.NoopCollector;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.common.util.FloatArray;
 import org.elasticsearch.common.util.LongHash;
@@ -53,7 +53,10 @@ import java.util.Set;
  * A query implementation that executes the wrapped parent query and
  * connects the matching parent docs to the related child documents
  * using the {@link ParentChildIndexFieldData}.
+ * @deprecated Use queries from lucene/join instead
  */
+@Deprecated
+@SuppressForbidden(reason="Old p/c queries still use filters")
 public class ParentQuery extends IndexCacheableQuery {
 
     private final ParentChildIndexFieldData parentChildIndexFieldData;
@@ -167,7 +170,7 @@ public class ParentQuery extends IndexCacheableQuery {
         public LeafCollector getLeafCollector(LeafReaderContext context) throws IOException {
             final SortedDocValues values = globalIfd.load(context).getOrdinalsValues(parentType);
             if (values == null) {
-                return NoopCollector.NOOP_COLLECTOR;
+                throw new CollectionTerminatedException();
             }
             return new LeafCollector() {
                 Scorer scorer;
@@ -202,6 +205,7 @@ public class ParentQuery extends IndexCacheableQuery {
 
     }
 
+    @SuppressForbidden(reason="Old p/c queries still use filters")
     private class ChildWeight extends Weight {
 
         private final Weight parentWeight;

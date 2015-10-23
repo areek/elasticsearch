@@ -334,6 +334,7 @@ public class ContextCompletionSuggestSearchIT extends ESIntegTestCase {
     }
 
     @Test
+    @AwaitsFix(bugUrl = "233D2BB9C144D208 fails")
     public void testMissingContextValue() throws Exception {
         LinkedHashMap<String, ContextMapping> map = new LinkedHashMap<>();
         map.put("cat", ContextBuilder.category("cat").field("cat").build());

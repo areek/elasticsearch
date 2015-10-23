@@ -331,7 +331,8 @@ public class PluginsService extends AbstractComponent {
             // jar-hell check the bundle against the parent classloader
             // pluginmanager does it, but we do it again, in case lusers mess with jar files manually
             try {
-                final List<URL> jars = new ArrayList<>(Arrays.asList(JarHell.parseClassPath()));
+                final List<URL> jars = new ArrayList<>();
+                jars.addAll(Arrays.asList(JarHell.parseClassPath()));
                 jars.addAll(bundle.urls);
                 JarHell.checkJarHell(jars.toArray(new URL[0]));
             } catch (Exception e) {

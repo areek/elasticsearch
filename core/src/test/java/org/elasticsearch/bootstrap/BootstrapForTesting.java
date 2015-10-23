@@ -25,14 +25,22 @@ import org.elasticsearch.bootstrap.ESPolicy;
 import org.elasticsearch.bootstrap.Security;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.PathUtils;
-import org.elasticsearch.common.logging.Loggers;
+import org.elasticsearch.plugins.PluginInfo;
 
 import java.io.FilePermission;
+import java.io.InputStream;
+import java.net.URI;
 import java.net.URL;
 import java.nio.file.Path;
+import java.security.Permission;
+import java.security.PermissionCollection;
 import java.security.Permissions;
 import java.security.Policy;
+import java.security.URIParameter;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
+import java.util.Properties;
 
 import static com.carrotsearch.randomizedtesting.RandomizedTest.systemPropertyAsBoolean;
 
@@ -73,10 +81,10 @@ public class BootstrapForTesting {
         }
 
         // install security manager if requested
-        if (systemPropertyAsBoolean("tests.security.manager", false)) {
+        if (systemPropertyAsBoolean("tests.security.manager", true)) {
             try {
                 Security.setCodebaseProperties();
-                // initialize paths the same exact way as bootstrap.
+                // initialize paths the same exact way as bootstrap
                 Permissions perms = new Permissions();
                 // add permissions to everything in classpath
                 for (URL url : JarHell.parseClassPath()) {
@@ -107,9 +115,53 @@ public class BootstrapForTesting {
                     // in case we get fancy and use the -integration goals later:
                     perms.add(new FilePermission(coverageDir.resolve("jacoco-it.exec").toString(), "read,write"));
                 }
-                Policy.setPolicy(new ESPolicy(perms));
+                // intellij hack: intellij test runner wants setIO and will
+                // screw up all test logging without it!
+                if (System.getProperty("tests.maven") == null) {
+                    perms.add(new RuntimePermission("setIO"));
+                }
+
+                final Policy policy;
+                // if its a plugin with special permissions, we use a wrapper policy impl to try
+                // to simulate what happens with a real distribution
+                List<URL> pluginPolicies = Collections.list(BootstrapForTesting.class.getClassLoader().getResources(PluginInfo.ES_PLUGIN_POLICY));
+                if (!pluginPolicies.isEmpty()) {
+                    Permissions extra = new Permissions();
+                    for (URL url : pluginPolicies) {
+                        URI uri = url.toURI();
+                        Policy pluginPolicy = Policy.getInstance("JavaPolicy", new URIParameter(uri));
+                        PermissionCollection permissions = pluginPolicy.getPermissions(BootstrapForTesting.class.getProtectionDomain());
+                        // this method is supported with the specific implementation we use, but just check for safety.
+                        if (permissions == Policy.UNSUPPORTED_EMPTY_COLLECTION) {
+                            throw new UnsupportedOperationException("JavaPolicy implementation does not support retrieving permissions");
+                        }
+                        for (Permission permission : Collections.list(permissions.elements())) {
+                            extra.add(permission);
+                        }
+                    }
+                    // TODO: try to get rid of this class now that the world is simpler?
+                    policy = new MockPluginPolicy(perms, extra);
+                } else {
+                    policy = new ESPolicy(perms, Collections.<String,PermissionCollection>emptyMap());
+                }
+                Policy.setPolicy(policy);
                 System.setSecurityManager(new TestSecurityManager());
                 Security.selfTest();
+
+                // guarantee plugin classes are initialized first, in case they have one-time hacks.
+                // this just makes unit testing more realistic
+                for (URL url : Collections.list(BootstrapForTesting.class.getClassLoader().getResources(PluginInfo.ES_PLUGIN_PROPERTIES))) {
+                    Properties properties = new Properties();
+                    try (InputStream stream = url.openStream()) {
+                        properties.load(stream);
+                    }
+                    if (Boolean.parseBoolean(properties.getProperty("jvm"))) {
+                        String clazz = properties.getProperty("classname");
+                        if (clazz != null) {
+                            Class.forName(clazz);
+                        }
+                    }
+                }
             } catch (Exception e) {
                 throw new RuntimeException("unable to install test security manager", e);
             }

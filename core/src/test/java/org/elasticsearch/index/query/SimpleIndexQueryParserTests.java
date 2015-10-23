@@ -30,7 +30,31 @@ import org.apache.lucene.search.*;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.join.ToParentBlockJoinQuery;
 import org.apache.lucene.search.spans.*;
-import org.apache.lucene.spatial.prefix.IntersectsPrefixTreeFilter;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.BoostQuery;
+import org.apache.lucene.search.ConstantScoreQuery;
+import org.apache.lucene.search.DisjunctionMaxQuery;
+import org.apache.lucene.search.FuzzyQuery;
+import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.search.MultiTermQuery;
+import org.apache.lucene.search.NumericRangeQuery;
+import org.apache.lucene.search.PrefixQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryWrapperFilter;
+import org.apache.lucene.search.RegexpQuery;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.TermRangeQuery;
+import org.apache.lucene.search.WildcardQuery;
+import org.apache.lucene.search.spans.FieldMaskingSpanQuery;
+import org.apache.lucene.search.spans.SpanContainingQuery;
+import org.apache.lucene.search.spans.SpanFirstQuery;
+import org.apache.lucene.search.spans.SpanMultiTermQueryWrapper;
+import org.apache.lucene.search.spans.SpanNearQuery;
+import org.apache.lucene.search.spans.SpanNotQuery;
+import org.apache.lucene.search.spans.SpanOrQuery;
+import org.apache.lucene.search.spans.SpanTermQuery;
+import org.apache.lucene.search.spans.SpanWithinQuery;
+import org.apache.lucene.spatial.prefix.IntersectsPrefixTreeQuery;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.CharsRefBuilder;
@@ -139,25 +163,30 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
     public void testQueryStringBoostsBuilder() throws Exception {
         IndexQueryParserService queryParser = queryParser();
         QueryStringQueryBuilder builder = queryStringQuery("field:boosted^2");
+        Query expected = new BoostQuery(new TermQuery(new Term("field", "boosted")), 2);
         Query parsedQuery = queryParser.parse(builder).query();
-        assertThat(parsedQuery, instanceOf(TermQuery.class));
-        assertThat(((TermQuery) parsedQuery).getTerm(), equalTo(new Term("field", "boosted")));
-        assertThat(parsedQuery.getBoost(), equalTo(2.0f));
+        assertEquals(expected, parsedQuery);
+
         builder.boost(2.0f);
+        expected = new BoostQuery(new TermQuery(new Term("field", "boosted")), 4);
         parsedQuery = queryParser.parse(builder).query();
-        assertThat(parsedQuery.getBoost(), equalTo(4.0f));
+        assertEquals(expected, parsedQuery);
 
         builder = queryStringQuery("((field:boosted^2) AND (field:foo^1.5))^3");
+        expected = new BoostQuery(new BooleanQuery.Builder()
+            .add(new BoostQuery(new TermQuery(new Term("field", "boosted")), 2), Occur.MUST)
+            .add(new BoostQuery(new TermQuery(new Term("field", "foo")), 1.5f), Occur.MUST)
+            .build(), 3);
         parsedQuery = queryParser.parse(builder).query();
-        assertThat(parsedQuery, instanceOf(BooleanQuery.class));
-        assertThat(assertBooleanSubQuery(parsedQuery, TermQuery.class, 0).getTerm(), equalTo(new Term("field", "boosted")));
-        assertThat(assertBooleanSubQuery(parsedQuery, TermQuery.class, 0).getBoost(), equalTo(2.0f));
-        assertThat(assertBooleanSubQuery(parsedQuery, TermQuery.class, 1).getTerm(), equalTo(new Term("field", "foo")));
-        assertThat(assertBooleanSubQuery(parsedQuery, TermQuery.class, 1).getBoost(), equalTo(1.5f));
-        assertThat(parsedQuery.getBoost(), equalTo(3.0f));
+        assertEquals(expected, parsedQuery);
+
         builder.boost(2.0f);
+        expected = new BoostQuery(new BooleanQuery.Builder()
+            .add(new BoostQuery(new TermQuery(new Term("field", "boosted")), 2), Occur.MUST)
+            .add(new BoostQuery(new TermQuery(new Term("field", "foo")), 1.5f), Occur.MUST)
+            .build(), 6);
         parsedQuery = queryParser.parse(builder).query();
-        assertThat(parsedQuery.getBoost(), equalTo(6.0f));
+        assertEquals(expected, parsedQuery);
     }
 
     @Test
@@ -2384,7 +2413,7 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
         assertThat(booleanClause.getQuery(), instanceOf(ConstantScoreQuery.class));
         ConstantScoreQuery constantScoreQuery = (ConstantScoreQuery) booleanClause.getQuery();
-        assertThat(constantScoreQuery.getQuery(), instanceOf(IntersectsPrefixTreeFilter.class));
+        assertThat(constantScoreQuery.getQuery(), instanceOf(IntersectsPrefixTreeQuery.class));
     }
 
     @Test
@@ -2394,7 +2423,7 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         Query parsedQuery = queryParser.parse(query).query();
         assertThat(parsedQuery, instanceOf(ConstantScoreQuery.class));
         ConstantScoreQuery csq = (ConstantScoreQuery) parsedQuery;
-        assertThat(csq.getQuery(), instanceOf(IntersectsPrefixTreeFilter.class));
+        assertThat(csq.getQuery(), instanceOf(IntersectsPrefixTreeQuery.class));
     }
 
     @Test
@@ -2512,10 +2541,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
 
             BooleanQuery.Builder expected = new BooleanQuery.Builder();
             expected.add(new TermQuery(new Term("foobar", "banon")), Occur.SHOULD);
-            TermQuery tq1 = new TermQuery(new Term("name.first", "banon"));
-            tq1.setBoost(2);
-            TermQuery tq2 = new TermQuery(new Term("name.last", "banon"));
-            tq2.setBoost(3);
+            Query tq1 = new BoostQuery(new TermQuery(new Term("name.first", "banon")), 2);
+            Query tq2 = new BoostQuery(new TermQuery(new Term("name.last", "banon")), 3);
             expected.add(new DisjunctionMaxQuery(Arrays.<Query>asList(tq1, tq2), 0f), Occur.SHOULD);
             assertEquals(expected.build(), rewrittenQuery);
         }
@@ -2581,18 +2608,6 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         XContentParser parser = XContentHelper.createParser(new BytesArray(query));
         ParsedQuery parsedQuery = queryParser.parseInnerFilter(parser);
         assertEquals(new ConstantScoreQuery(Queries.filtered(new TermQuery(new Term("text", "apache")), new TermQuery(new Term("text", "apache")))), parsedQuery.query());
-    }
-
-    @Test
-    public void testProperErrorMessageWhenTwoFunctionsDefinedInQueryBody() throws IOException {
-        IndexQueryParserService queryParser = queryParser();
-        String query = copyToStringFromClasspath("/org/elasticsearch/index/query/function-score-query-causing-NPE.json");
-        try {
-            queryParser.parse(query).query();
-            fail("FunctionScoreQueryParser should throw an exception here because two functions in body are not allowed.");
-        } catch (QueryParsingException e) {
-            assertThat(e.getDetailedMessage(), containsString("use [functions] array if you want to define several functions."));
-        }
     }
 
     @Test
@@ -2681,16 +2696,13 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
         assertThat(booleanClause.getQuery(), instanceOf(ToParentBlockJoinQuery.class));
         ToParentBlockJoinQuery toParentBlockJoinQuery = (ToParentBlockJoinQuery) booleanClause.getQuery();
-        assertThat(toParentBlockJoinQuery.toString(), equalTo("ToParentBlockJoinQuery (+*:* #QueryWrapperFilter(_type:__nested))"));
+        assertThat(toParentBlockJoinQuery.toString(), equalTo("ToParentBlockJoinQuery (+*:* #_type:__nested)"));
         SearchContext.removeCurrent();
     }
     
     /** 
      * helper to extract term from TermQuery. */
     private Term getTerm(Query query) {
-        while (query instanceof QueryWrapperFilter) {
-            query = ((QueryWrapperFilter) query).getQuery();
-        }
         TermQuery wrapped = (TermQuery) query;
         return wrapped.getTerm();
     }
