@@ -21,13 +21,13 @@ package org.elasticsearch.index.mapper.core;
 import com.google.common.collect.Sets;
 import org.apache.lucene.codecs.PostingsFormat;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.search.suggest.xdocument.Completion50PostingsFormat;
-import org.apache.lucene.search.suggest.xdocument.CompletionAnalyzer;
-import org.apache.lucene.search.suggest.xdocument.CompletionQuery;
-import org.apache.lucene.search.suggest.xdocument.FuzzyCompletionQuery;
-import org.apache.lucene.search.suggest.xdocument.PrefixCompletionQuery;
-import org.apache.lucene.search.suggest.xdocument.RegexCompletionQuery;
-import org.apache.lucene.search.suggest.xdocument.SuggestField;
+import org.apache.lucene.search.suggest.document.Completion50PostingsFormat;
+import org.apache.lucene.search.suggest.document.CompletionAnalyzer;
+import org.apache.lucene.search.suggest.document.CompletionQuery;
+import org.apache.lucene.search.suggest.document.FuzzyCompletionQuery;
+import org.apache.lucene.search.suggest.document.PrefixCompletionQuery;
+import org.apache.lucene.search.suggest.document.RegexCompletionQuery;
+import org.apache.lucene.search.suggest.document.SuggestField;
 import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.ParseField;
@@ -429,7 +429,7 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
      *
      * Indexing:
      *  if context mappings are defined, delegates to {@link ContextMappings#addField(ParseContext.Document, String, String, int, Map)}
-     *  else adds inputs as a {@link org.apache.lucene.search.suggest.xdocument.SuggestField}
+     *  else adds inputs as a {@link org.apache.lucene.search.suggest.document.SuggestField}
      */
     @Override
     public Mapper parse(ParseContext context) throws IOException {

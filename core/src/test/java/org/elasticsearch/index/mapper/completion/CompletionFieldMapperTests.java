@@ -20,7 +20,7 @@ package org.elasticsearch.index.mapper.completion;
 
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.search.suggest.xdocument.*;
+import org.apache.lucene.search.suggest.document.*;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.CharsRefBuilder;
 import org.apache.lucene.util.automaton.Operations;

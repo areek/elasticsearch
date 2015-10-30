@@ -18,7 +18,7 @@
  */
 package org.elasticsearch.search.suggest.completion;
 
-import org.apache.lucene.search.suggest.xdocument.CompletionQuery;
+import org.apache.lucene.search.suggest.document.CompletionQuery;
 import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.MapperService;

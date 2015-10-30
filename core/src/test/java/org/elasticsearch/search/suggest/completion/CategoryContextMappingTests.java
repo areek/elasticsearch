@@ -22,7 +22,7 @@ package org.elasticsearch.search.suggest.completion;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.IndexableField;
-import org.apache.lucene.search.suggest.xdocument.ContextSuggestField;
+import org.apache.lucene.search.suggest.document.ContextSuggestField;
 import org.elasticsearch.common.xcontent.*;
 import org.elasticsearch.index.mapper.*;
 import org.elasticsearch.search.suggest.completion.context.CategoryContextMapping;

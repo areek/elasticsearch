@@ -24,7 +24,7 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.Terms;
-import org.apache.lucene.search.suggest.xdocument.CompletionTerms;
+import org.apache.lucene.search.suggest.document.CompletionTerms;
 import org.elasticsearch.common.regex.Regex;
 
 import java.io.IOException;

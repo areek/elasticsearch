@@ -21,7 +21,7 @@ package org.elasticsearch.search.suggest;
 import com.carrotsearch.hppc.ObjectLongHashMap;
 import com.carrotsearch.randomizedtesting.generators.RandomStrings;
 import org.apache.lucene.analysis.TokenStreamToAutomaton;
-import org.apache.lucene.search.suggest.xdocument.ContextSuggestField;
+import org.apache.lucene.search.suggest.document.ContextSuggestField;
 import org.apache.lucene.util.LuceneTestCase.SuppressCodecs;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.ShardOperationFailedException;
