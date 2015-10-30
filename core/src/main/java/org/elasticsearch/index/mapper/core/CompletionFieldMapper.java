@@ -512,7 +512,7 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
                             try {
                                 weightValue = Long.parseLong(parser.text());
                             } catch (NumberFormatException e) {
-                                throw new IllegalArgumentException("weight must be a string representing a numeric value, but was [" + parser.text() + "]");
+                                throw new IllegalArgumentException("weight must be an integer, but was [" + parser.text() + "]");
                             }
                         } else if (token == Token.VALUE_NUMBER) {
                             NumberType numberType = parser.numberType();
