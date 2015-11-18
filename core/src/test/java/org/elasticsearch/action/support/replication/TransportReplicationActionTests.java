@@ -54,10 +54,7 @@ import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.cluster.TestClusterService;
 import org.elasticsearch.test.transport.CapturingTransport;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.transport.TransportChannel;
-import org.elasticsearch.transport.TransportResponse;
-import org.elasticsearch.transport.TransportResponseOptions;
-import org.elasticsearch.transport.TransportService;
+import org.elasticsearch.transport.*;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -132,22 +129,22 @@ public class TransportReplicationActionTests extends ESTestCase {
         ClusterBlocks.Builder block = ClusterBlocks.builder()
                 .addGlobalBlock(new ClusterBlock(1, "non retryable", false, true, RestStatus.SERVICE_UNAVAILABLE, ClusterBlockLevel.ALL));
         clusterService.setState(ClusterState.builder(clusterService.state()).blocks(block));
-        TransportReplicationAction<Request, Request, Response>.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, listener);
-        assertFalse("primary phase should stop execution", primaryPhase.checkBlocks());
+        TransportReplicationAction.ReroutePhase reroutePhase = action.new ReroutePhase(request, listener);
+        assertFalse("primary phase should stop execution", reroutePhase.checkBlocks());
         assertListenerThrows("primary phase should fail operation", listener, ClusterBlockException.class);
 
         block = ClusterBlocks.builder()
                 .addGlobalBlock(new ClusterBlock(1, "retryable", true, true, RestStatus.SERVICE_UNAVAILABLE, ClusterBlockLevel.ALL));
         clusterService.setState(ClusterState.builder(clusterService.state()).blocks(block));
         listener = new PlainActionFuture<>();
-        primaryPhase = action.new PrimaryPhase(new Request().timeout("5ms"), listener);
-        assertFalse("primary phase should stop execution on retryable block", primaryPhase.checkBlocks());
+        reroutePhase = action.new ReroutePhase(new Request().timeout("5ms"), listener);
+        assertFalse("primary phase should stop execution on retryable block", reroutePhase.checkBlocks());
         assertListenerThrows("failed to timeout on retryable block", listener, ClusterBlockException.class);
 
 
         listener = new PlainActionFuture<>();
-        primaryPhase = action.new PrimaryPhase(new Request(), listener);
-        assertFalse("primary phase should stop execution on retryable block", primaryPhase.checkBlocks());
+        reroutePhase = action.new ReroutePhase(new Request(), listener);
+        assertFalse("primary phase should stop execution on retryable block", reroutePhase.checkBlocks());
         assertFalse("primary phase should wait on retryable block", listener.isDone());
 
         block = ClusterBlocks.builder()
@@ -172,22 +169,62 @@ public class TransportReplicationActionTests extends ESTestCase {
 
         Request request = new Request(shardId).timeout("1ms");
         PlainActionFuture<Response> listener = new PlainActionFuture<>();
-        TransportReplicationAction<Request, Request, Response>.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, listener);
-        primaryPhase.run();
+        TransportReplicationAction.ReroutePhase reroutePhase = action.new ReroutePhase(request, listener);
+        reroutePhase.run();
         assertListenerThrows("unassigned primary didn't cause a timeout", listener, UnavailableShardsException.class);
 
         request = new Request(shardId);
         listener = new PlainActionFuture<>();
-        primaryPhase = action.new PrimaryPhase(request, listener);
-        primaryPhase.run();
+        reroutePhase = action.new ReroutePhase(request, listener);
+        reroutePhase.run();
         assertFalse("unassigned primary didn't cause a retry", listener.isDone());
 
         clusterService.setState(state(index, true, ShardRoutingState.STARTED));
         logger.debug("--> primary assigned state:\n{}", clusterService.state().prettyPrint());
 
-        listener.get();
-        assertTrue("request wasn't processed on primary, despite of it being assigned", request.processedOnPrimary.get());
+        final IndexShardRoutingTable shardRoutingTable = clusterService.state().routingTable().index(index).shard(shardId.id());
+        final String primaryNodeId = shardRoutingTable.primaryShard().currentNodeId();
+        final List<CapturingTransport.CapturedRequest> capturedRequests = transport.capturedRequestsByTargetNode().get(primaryNodeId);
+        assertThat(capturedRequests, notNullValue());
+        assertThat(capturedRequests.size(), equalTo(1));
+        assertThat(capturedRequests.get(0).action, equalTo("testAction[p]"));
         assertIndexShardCounter(1);
+    }
+
+    public void testPrimaryAction() throws InterruptedException, ExecutionException {
+        final String index = "test";
+        final ShardId shardId = new ShardId(index, 0);
+
+        // the receiving node for primary action has an inactive primary
+        clusterService.setState(state(index, true, randomBoolean() ? ShardRoutingState.UNASSIGNED : ShardRoutingState.INITIALIZING));
+        Request request = new Request(shardId).timeout("1ms");
+        PlainActionFuture<Response> listener = new PlainActionFuture<>();
+        TransportReplicationAction.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, createTransportChannel(listener));
+        primaryPhase.run();
+        assertListenerThrows("should throw exception to trigger retry", listener, UnavailableShardsException.class);
+        assertIndexShardUninitialized();
+
+        // can't use primaryLocal, it does not always respect the setting (seed: 19670B921557C38D)
+        clusterService.setState(state(index, randomBoolean(), ShardRoutingState.STARTED, ShardRoutingState.STARTED));
+        final IndexShardRoutingTable shardRoutingTable = clusterService.state().routingTable().index(index).shard(shardId.id());
+        final String primaryNodeId = shardRoutingTable.primaryShard().currentNodeId();
+        if (clusterService.localNode().id().equals(primaryNodeId)) {
+            // the receiving node for primary action has the primary
+            clusterService.setState(stateWithStartedPrimary(index, true, 1));
+            request = new Request(shardId).timeout("1ms");
+            listener = new PlainActionFuture<>();
+            primaryPhase = action.new PrimaryPhase(request, createTransportChannel(listener));
+            primaryPhase.run();
+            assertThat("request was not processed on primary", request.processedOnPrimary.get(), equalTo(true));
+        } else {
+            // the receiving node for primary action does not have the primary anymore
+            request = new Request(shardId).timeout("1ms");
+            listener = new PlainActionFuture<>();
+            primaryPhase = action.new PrimaryPhase(request, createTransportChannel(listener));
+            primaryPhase.run();
+            assertListenerThrows("should throw exception to trigger retry", listener, UnavailableShardsException.class);
+            assertIndexShardUninitialized();
+        }
     }
 
     public void testRoutingToPrimary() {
@@ -203,25 +240,15 @@ public class TransportReplicationActionTests extends ESTestCase {
         Request request = new Request(shardId);
         PlainActionFuture<Response> listener = new PlainActionFuture<>();
 
-        TransportReplicationAction<Request, Request, Response>.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, listener);
-        assertTrue(primaryPhase.checkBlocks());
-        primaryPhase.routeRequestOrPerformLocally(shardRoutingTable.primaryShard(), shardRoutingTable.shardsIt());
-        if (primaryNodeId.equals(clusterService.localNode().id())) {
-            logger.info("--> primary is assigned locally, testing for execution");
-            assertTrue("request failed to be processed on a local primary", request.processedOnPrimary.get());
-            if (transport.capturedRequests().length > 0) {
-                assertIndexShardCounter(2);
-            } else {
-                assertIndexShardCounter(1);
-            }
-        } else {
-            logger.info("--> primary is assigned to [{}], checking request forwarded", primaryNodeId);
-            final List<CapturingTransport.CapturedRequest> capturedRequests = transport.capturedRequestsByTargetNode().get(primaryNodeId);
-            assertThat(capturedRequests, notNullValue());
-            assertThat(capturedRequests.size(), equalTo(1));
-            assertThat(capturedRequests.get(0).action, equalTo("testAction"));
-            assertIndexShardUninitialized();
-        }
+        TransportReplicationAction.ReroutePhase reroutePhase = action.new ReroutePhase(request, listener);
+        assertTrue(reroutePhase.checkBlocks());
+        reroutePhase.performPrimary(shardRoutingTable.primaryShard());
+        logger.info("--> primary is assigned to [{}], checking request forwarded", primaryNodeId);
+        final List<CapturingTransport.CapturedRequest> capturedRequests = transport.capturedRequestsByTargetNode().get(primaryNodeId);
+        assertThat(capturedRequests, notNullValue());
+        assertThat(capturedRequests.size(), equalTo(1));
+        assertThat(capturedRequests.get(0).action, equalTo("testAction[p]"));
+        assertIndexShardUninitialized();
     }
 
     public void testWriteConsistency() throws ExecutionException, InterruptedException {
@@ -266,8 +293,7 @@ public class TransportReplicationActionTests extends ESTestCase {
 
         final IndexShardRoutingTable shardRoutingTable = clusterService.state().routingTable().index(index).shard(shardId.id());
         PlainActionFuture<Response> listener = new PlainActionFuture<>();
-
-        TransportReplicationAction<Request, Request, Response>.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, listener);
+        TransportReplicationAction.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, createTransportChannel(listener));
         if (passesWriteConsistency) {
             assertThat(primaryPhase.checkWriteConsistency(shardRoutingTable.primaryShard()), nullValue());
             primaryPhase.run();
@@ -281,11 +307,15 @@ public class TransportReplicationActionTests extends ESTestCase {
             assertThat(primaryPhase.checkWriteConsistency(shardRoutingTable.primaryShard()), notNullValue());
             primaryPhase.run();
             assertFalse("operations should not have been perform, consistency level is *NOT* met", request.processedOnPrimary.get());
+            assertListenerThrows("should throw exception to trigger retry", listener, UnavailableShardsException.class);
             assertIndexShardUninitialized();
             for (int i = 0; i < replicaStates.length; i++) {
                 replicaStates[i] = ShardRoutingState.STARTED;
             }
             clusterService.setState(state(index, true, ShardRoutingState.STARTED, replicaStates));
+            listener = new PlainActionFuture<>();
+            primaryPhase = action.new PrimaryPhase(request, createTransportChannel(listener));
+            primaryPhase.run();
             assertTrue("once the consistency level met, operation should continue", request.processedOnPrimary.get());
             assertIndexShardCounter(2);
         }
@@ -344,8 +374,7 @@ public class TransportReplicationActionTests extends ESTestCase {
         final ShardIterator shardIt = shardRoutingTable.shardsIt();
         final ShardId shardId = shardIt.shardId();
         final Request request = new Request();
-        PlainActionFuture<Response> listener = new PlainActionFuture<>();
-
+        final PlainActionFuture<Response> listener = new PlainActionFuture<>();
         logger.debug("expecting [{}] assigned replicas, [{}] total shards. using state: \n{}", assignedReplicas, totalShards, clusterService.state().prettyPrint());
 
         final TransportReplicationAction<Request, Request, Response>.InternalRequest internalRequest = action.new InternalRequest(request);
@@ -356,7 +385,7 @@ public class TransportReplicationActionTests extends ESTestCase {
         TransportReplicationAction<Request, Request, Response>.ReplicationPhase replicationPhase =
                 action.new ReplicationPhase(shardIt, request,
                         new Response(), new ClusterStateObserver(clusterService, logger),
-                        primaryShard, internalRequest, listener, reference, null);
+                        primaryShard, internalRequest, createTransportChannel(listener), reference, null);
 
         assertThat(replicationPhase.totalShards(), equalTo(totalShards));
         assertThat(replicationPhase.pending(), equalTo(assignedReplicas));
@@ -433,7 +462,7 @@ public class TransportReplicationActionTests extends ESTestCase {
          * However, this failure would only become apparent once listener.get is called. Seems a little implicit.
          * */
         action = new ActionWithDelay(Settings.EMPTY, "testActionWithExceptions", transportService, clusterService, threadPool);
-        final TransportReplicationAction<Request, Request, Response>.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, listener);
+        final TransportReplicationAction.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, createTransportChannel(listener));
         Thread t = new Thread() {
             @Override
             public void run() {
@@ -464,7 +493,7 @@ public class TransportReplicationActionTests extends ESTestCase {
         logger.debug("--> using initial state:\n{}", clusterService.state().prettyPrint());
         Request request = new Request(shardId).timeout("100ms");
         PlainActionFuture<Response> listener = new PlainActionFuture<>();
-        TransportReplicationAction<Request, Request, Response>.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, listener);
+        TransportReplicationAction.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, createTransportChannel(listener));
         primaryPhase.run();
         assertIndexShardCounter(2);
         assertThat(transport.capturedRequests().length, equalTo(1));
@@ -473,7 +502,7 @@ public class TransportReplicationActionTests extends ESTestCase {
         assertIndexShardCounter(1);
         transport.clear();
         request = new Request(shardId).timeout("100ms");
-        primaryPhase = action.new PrimaryPhase(request, listener);
+        primaryPhase = action.new PrimaryPhase(request, createTransportChannel(listener));
         primaryPhase.run();
         assertIndexShardCounter(2);
         CapturingTransport.CapturedRequest[] replicationRequests = transport.capturedRequests();
@@ -498,7 +527,7 @@ public class TransportReplicationActionTests extends ESTestCase {
             @Override
             public void run() {
                 try {
-                    replicaOperationTransportHandler.messageReceived(new Request(), createTransportChannel());
+                    replicaOperationTransportHandler.messageReceived(new Request(), createTransportChannel(new PlainActionFuture<>()));
                 } catch (Exception e) {
                 }
             }
@@ -515,7 +544,7 @@ public class TransportReplicationActionTests extends ESTestCase {
         action = new ActionWithExceptions(Settings.EMPTY, "testActionWithExceptions", transportService, clusterService, threadPool);
         final Action.ReplicaOperationTransportHandler replicaOperationTransportHandlerForException = action.new ReplicaOperationTransportHandler();
         try {
-            replicaOperationTransportHandlerForException.messageReceived(new Request(shardId), createTransportChannel());
+            replicaOperationTransportHandlerForException.messageReceived(new Request(shardId), createTransportChannel(new PlainActionFuture<>()));
             fail();
         } catch (Throwable t2) {
         }
@@ -531,7 +560,7 @@ public class TransportReplicationActionTests extends ESTestCase {
         logger.debug("--> using initial state:\n{}", clusterService.state().prettyPrint());
         Request request = new Request(shardId).timeout("100ms");
         PlainActionFuture<Response> listener = new PlainActionFuture<>();
-        TransportReplicationAction<Request, Request, Response>.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, listener);
+        TransportReplicationAction.PrimaryPhase primaryPhase = action.new PrimaryPhase(request, createTransportChannel(listener));
         primaryPhase.run();
         // no replica request should have been sent yet
         assertThat(transport.capturedRequests().length, equalTo(0));
@@ -720,7 +749,7 @@ public class TransportReplicationActionTests extends ESTestCase {
     /*
     * Transport channel that is needed for replica operation testing.
     * */
-    public TransportChannel createTransportChannel() {
+    public TransportChannel createTransportChannel(final PlainActionFuture<Response> listener) {
         return new TransportChannel() {
 
             @Override
@@ -735,14 +764,17 @@ public class TransportReplicationActionTests extends ESTestCase {
 
             @Override
             public void sendResponse(TransportResponse response) throws IOException {
+                listener.onResponse(((Response) response));
             }
 
             @Override
             public void sendResponse(TransportResponse response, TransportResponseOptions options) throws IOException {
+                listener.onResponse(((Response) response));
             }
 
             @Override
             public void sendResponse(Throwable error) throws IOException {
+                listener.onFailure(error);
             }
         };
     }

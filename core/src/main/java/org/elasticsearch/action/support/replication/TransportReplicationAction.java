@@ -92,6 +92,7 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
     private final TimeValue shardFailedTimeout;
 
     final String transportReplicaAction;
+    final String transportPrimaryAction;
     final String executor;
     final boolean checkWriteConsistency;
 
@@ -108,11 +109,13 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
         this.shardStateAction = shardStateAction;
         this.mappingUpdatedAction = mappingUpdatedAction;
 
+        this.transportPrimaryAction = actionName + "[p]";
         this.transportReplicaAction = actionName + "[r]";
         this.executor = executor;
         this.checkWriteConsistency = checkWriteConsistency();
 
         transportService.registerRequestHandler(actionName, request, ThreadPool.Names.SAME, new OperationTransportHandler());
+        transportService.registerRequestHandler(transportPrimaryAction, request, executor, new PrimaryOperationTransportHandler());
         // we must never reject on because of thread pool capacity on replicas
         transportService.registerRequestHandler(transportReplicaAction, replicaRequest, executor, true, new ReplicaOperationTransportHandler());
 
@@ -125,7 +128,7 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
 
     @Override
     protected void doExecute(Request request, ActionListener<Response> listener) {
-        new PrimaryPhase(request, listener).run();
+        new ReroutePhase(request, listener).run();
     }
 
     protected abstract Response newResponseInstance();
@@ -240,6 +243,13 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
         }
     }
 
+    class PrimaryOperationTransportHandler implements TransportRequestHandler<Request> {
+        @Override
+        public void messageReceived(final Request request, final TransportChannel channel) throws Exception {
+            new PrimaryPhase(request, channel).run();
+        }
+    }
+
     class ReplicaOperationTransportHandler implements TransportRequestHandler<ReplicaRequest> {
         @Override
         public void messageReceived(final ReplicaRequest request, final TransportChannel channel) throws Exception {
@@ -343,19 +353,16 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
     }
 
     /**
-     * Responsible for performing all operations up to the point we start starting sending requests to replica shards.
-     * Including forwarding the request to another node if the primary is not assigned locally.
-     * <p>
-     * Note that as soon as we start sending request to replicas, state responsibility is transferred to {@link ReplicationPhase}
+     * Responsible for routing and retrying failed operations on the primary.
+     * The actual primary operation is done in {@link PrimaryPhase}
      */
-    final class PrimaryPhase extends AbstractRunnable {
+    final class ReroutePhase extends AbstractRunnable {
         private final ActionListener<Response> listener;
         private final InternalRequest internalRequest;
         private final ClusterStateObserver observer;
         private final AtomicBoolean finished = new AtomicBoolean(false);
-        private volatile Releasable indexShardReference;
 
-        PrimaryPhase(Request request, ActionListener<Response> listener) {
+        ReroutePhase(Request request, ActionListener<Response> listener) {
             this.internalRequest = new InternalRequest(request);
             this.listener = listener;
             this.observer = new ClusterStateObserver(clusterService, internalRequest.request().timeout(), logger);
@@ -387,7 +394,7 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
                 retryBecauseUnavailable(shardIt.shardId(), "Primary shard is not active or isn't assigned to a known node.");
                 return;
             }
-            routeRequestOrPerformLocally(primary, shardIt);
+            performPrimary(primary);
         }
 
         /**
@@ -427,76 +434,43 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
             return true;
         }
 
-        protected ShardRouting resolvePrimary(ShardIterator shardIt) {
-            // no shardIt, might be in the case between index gateway recovery and shardIt initialization
-            ShardRouting shard;
-            while ((shard = shardIt.nextOrNull()) != null) {
-                // we only deal with primary shardIt here...
-                if (shard.primary()) {
-                    return shard;
+        protected void performPrimary(final ShardRouting primary) {
+            DiscoveryNode node = observer.observedState().nodes().get(primary.currentNodeId());
+            transportService.sendRequest(node, transportPrimaryAction, internalRequest.request(), transportOptions, new BaseTransportResponseHandler<Response>() {
+
+                @Override
+                public Response newInstance() {
+                    return newResponseInstance();
                 }
-            }
-            return null;
-        }
 
-        /**
-         * send the request to the node holding the primary or execute if local
-         */
-        protected void routeRequestOrPerformLocally(final ShardRouting primary, final ShardIterator shardsIt) {
-            if (primary.currentNodeId().equals(observer.observedState().nodes().localNodeId())) {
-                try {
-                    threadPool.executor(executor).execute(new AbstractRunnable() {
-                        @Override
-                        public void onFailure(Throwable t) {
-                            finishAsFailed(t);
-                        }
-
-                        @Override
-                        protected void doRun() throws Exception {
-                            performOnPrimary(primary, shardsIt);
-                        }
-                    });
-                } catch (Throwable t) {
-                    finishAsFailed(t);
+                @Override
+                public String executor() {
+                    return ThreadPool.Names.SAME;
                 }
-            } else {
-                DiscoveryNode node = observer.observedState().nodes().get(primary.currentNodeId());
-                transportService.sendRequest(node, actionName, internalRequest.request(), transportOptions, new BaseTransportResponseHandler<Response>() {
 
-                    @Override
-                    public Response newInstance() {
-                        return newResponseInstance();
-                    }
+                @Override
+                public void handleResponse(Response response) {
+                    finishOnSuccess(response);
+                }
 
-                    @Override
-                    public String executor() {
-                        return ThreadPool.Names.SAME;
-                    }
-
-                    @Override
-                    public void handleResponse(Response response) {
-                        finishOnRemoteSuccess(response);
-                    }
-
-                    @Override
-                    public void handleException(TransportException exp) {
-                        try {
-                            // if we got disconnected from the node, or the node / shard is not in the right state (being closed)
-                            if (exp.unwrapCause() instanceof ConnectTransportException || exp.unwrapCause() instanceof NodeClosedException ||
-                                    retryPrimaryException(exp)) {
-                                // we already marked it as started when we executed it (removed the listener) so pass false
-                                // to re-add to the cluster listener
-                                logger.trace("received an error from node the primary was assigned to ({}), scheduling a retry", exp.getMessage());
-                                retry(exp);
-                            } else {
-                                finishAsFailed(exp);
-                            }
-                        } catch (Throwable t) {
-                            finishWithUnexpectedFailure(t);
+                @Override
+                public void handleException(TransportException exp) {
+                    try {
+                        // if we got disconnected from the node, or the node / shard is not in the right state (being closed)
+                        if (exp.unwrapCause() instanceof ConnectTransportException || exp.unwrapCause() instanceof NodeClosedException ||
+                                retryPrimaryException(exp.unwrapCause())) {
+                            // we already marked it as started when we executed it (removed the listener) so pass false
+                            // to re-add to the cluster listener
+                            logger.trace("received an error from node the primary was assigned to ({}), scheduling a retry", exp.getMessage());
+                            retry(exp);
+                        } else {
+                            finishAsFailed(exp);
                         }
+                    } catch (Throwable t) {
+                        finishWithUnexpectedFailure(t);
                     }
-                });
-            }
+                }
+            });
         }
 
         void retry(Throwable failure) {
@@ -525,21 +499,8 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
             });
         }
 
-        /**
-         * upon success, finish the first phase and transfer responsibility to the {@link ReplicationPhase}
-         */
-        void finishAndMoveToReplication(ReplicationPhase replicationPhase) {
-            if (finished.compareAndSet(false, true)) {
-                replicationPhase.run();
-            } else {
-                assert false : "finishAndMoveToReplication called but operation is already finished";
-            }
-        }
-
-
         void finishAsFailed(Throwable failure) {
             if (finished.compareAndSet(false, true)) {
-                Releasables.close(indexShardReference);
                 logger.trace("operation failed", failure);
                 listener.onFailure(failure);
             } else {
@@ -550,14 +511,13 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
         void finishWithUnexpectedFailure(Throwable failure) {
             logger.warn("unexpected error during the primary phase for action [{}]", failure, actionName);
             if (finished.compareAndSet(false, true)) {
-                Releasables.close(indexShardReference);
                 listener.onFailure(failure);
             } else {
                 assert false : "finishWithUnexpectedFailure called but operation is already finished";
             }
         }
 
-        void finishOnRemoteSuccess(Response response) {
+        void finishOnSuccess(Response response) {
             if (finished.compareAndSet(false, true)) {
                 logger.trace("operation succeeded");
                 listener.onResponse(response);
@@ -566,13 +526,74 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
             }
         }
 
+        void retryBecauseUnavailable(ShardId shardId, String message) {
+            retry(new UnavailableShardsException(shardId, message + " Timeout: [" + internalRequest.request().timeout() + "], request: " + internalRequest.request().toString()));
+        }
+    }
+
+    /**
+     * Responsible for performing all operations up to the point we start sending requests to replica shards.
+     * When unavailable shards or any retry-able primary errors are encountered they are sent to {@link ReroutePhase}
+     * <p>
+     * Note that as soon as we start sending request to replicas, state responsibility is transferred to {@link ReplicationPhase}
+     */
+    final class PrimaryPhase extends AbstractRunnable {
+        private final InternalRequest internalRequest;
+        private final TransportChannel channel;
+        private final AtomicBoolean finished = new AtomicBoolean(false);
+        private volatile Releasable indexShardReference;
+        private final ClusterStateObserver observer;
+
+        PrimaryPhase(Request request, TransportChannel channel) {
+            this.internalRequest = new InternalRequest(request);
+            this.channel = channel;
+            this.observer = new ClusterStateObserver(clusterService, request.timeout(), logger);
+        }
+
+        @Override
+        public void onFailure(Throwable e) {
+            finishAsFailed(e);
+        }
+
+        @Override
+        protected void doRun() throws Exception {
+            if (resolveIndex()) {
+                internalRequest.concreteIndex(indexNameExpressionResolver.concreteSingleIndex(observer.observedState(), internalRequest.request()));
+            } else {
+                internalRequest.concreteIndex(internalRequest.request().index());
+            }
+            final ShardIterator shardIt = shards(observer.observedState(), internalRequest);
+            final ShardRouting primary = resolvePrimary(shardIt);
+            if (primary == null) {
+                finishBecauseUnavailable(shardIt.shardId(), "No active shards.");
+                return;
+            }
+            if (primary.active() == false) {
+                logger.trace("primary shard [{}] is not yet active, scheduling a retry.", primary.shardId());
+                finishBecauseUnavailable(shardIt.shardId(), "Primary shard is not active or isn't assigned to a known node.");
+                return;
+            }
+            if (observer.observedState().nodes().nodeExists(primary.currentNodeId()) == false) {
+                logger.trace("primary shard [{}] is assigned to anode we do not know the node, scheduling a retry.", primary.shardId(), primary.currentNodeId());
+                finishBecauseUnavailable(shardIt.shardId(), "Primary shard is not active or isn't assigned to a known node.");
+                return;
+            }
+            if (primary.currentNodeId().equals(observer.observedState().nodes().localNodeId()) == false) {
+                logger.trace("primary shard [{}] is assigned to another node, scheduling a retry.", primary.shardId(), primary.currentNodeId());
+                finishBecauseUnavailable(shardIt.shardId(), "Primary shard is assigned to another node.");
+                return;
+            }
+
+            performPrimary(primary, shardIt);
+        }
+
         /**
          * perform the operation on the node holding the primary
          */
-        void performOnPrimary(final ShardRouting primary, final ShardIterator shardsIt) {
+        void performPrimary(final ShardRouting primary, final ShardIterator shardsIt) {
             final String writeConsistencyFailure = checkWriteConsistency(primary);
             if (writeConsistencyFailure != null) {
-                retryBecauseUnavailable(primary.shardId(), writeConsistencyFailure);
+                finishBecauseUnavailable(primary.shardId(), writeConsistencyFailure);
                 return;
             }
             final ReplicationPhase replicationPhase;
@@ -581,7 +602,7 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
                 PrimaryOperationRequest por = new PrimaryOperationRequest(primary.id(), internalRequest.concreteIndex(), internalRequest.request());
                 Tuple<Response, ReplicaRequest> primaryResponse = shardOperationOnPrimary(observer.observedState(), por);
                 logger.trace("operation completed on primary [{}]", primary);
-                replicationPhase = new ReplicationPhase(shardsIt, primaryResponse.v2(), primaryResponse.v1(), observer, primary, internalRequest, listener, indexShardReference, shardFailedTimeout);
+                replicationPhase = new ReplicationPhase(shardsIt, primaryResponse.v2(), primaryResponse.v1(), observer, primary, internalRequest, channel, indexShardReference, shardFailedTimeout);
             } catch (Throwable e) {
                 // shard has not been allocated yet, retry it here
                 if (retryPrimaryException(e)) {
@@ -592,7 +613,7 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
                     // We have to reset to null here because whe we retry it might be that we never get to the point where we assign a new reference
                     // (for example, in case the operation was rejected because queue is full). In this case we would release again once one of the finish methods is called.
                     indexShardReference = null;
-                    retry(e);
+                    finishAsFailed(e);
                     return;
                 }
                 if (ExceptionsHelper.status(e) == RestStatus.CONFLICT) {
@@ -658,10 +679,34 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
             }
         }
 
-        void retryBecauseUnavailable(ShardId shardId, String message) {
-            retry(new UnavailableShardsException(shardId, message + " Timeout: [" + internalRequest.request().timeout() + "], request: " + internalRequest.request().toString()));
+        /**
+         * upon success, finish the first phase and transfer responsibility to the {@link ReplicationPhase}
+         */
+        void finishAndMoveToReplication(ReplicationPhase replicationPhase) {
+            if (finished.compareAndSet(false, true)) {
+                replicationPhase.run();
+            } else {
+                assert false : "finishAndMoveToReplication called but operation is already finished";
+            }
         }
 
+        void finishAsFailed(Throwable failure) {
+            if (finished.compareAndSet(false, true)) {
+                Releasables.close(indexShardReference);
+                logger.trace("operation failed", failure);
+                try {
+                    channel.sendResponse(failure);
+                } catch (IOException responseException) {
+                    logger.warn("failed to send error message back to client for action [" + transportPrimaryAction + "]", responseException);
+                }
+            } else {
+                assert false : "finishAsFailed called but operation is already finished";
+            }
+        }
+
+        void finishBecauseUnavailable(ShardId shardId, String message) {
+            finishAsFailed(new UnavailableShardsException(shardId, message + " Timeout: [" + internalRequest.request().timeout() + "], request: " + internalRequest.request().toString()));
+        }
     }
 
     protected Releasable getIndexShardOperationsCounter(ShardId shardId) {
@@ -695,7 +740,7 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
         private final ReplicaRequest replicaRequest;
         private final Response finalResponse;
         private final ShardIterator shardIt;
-        private final ActionListener<Response> listener;
+        private final TransportChannel channel;
         private final AtomicBoolean finished = new AtomicBoolean(false);
         private final AtomicInteger success = new AtomicInteger(1); // We already wrote into the primary shard
         private final ConcurrentMap<String, Throwable> shardReplicaFailures = ConcurrentCollections.newConcurrentMap();
@@ -713,10 +758,10 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
          */
         public ReplicationPhase(ShardIterator originalShardIt, ReplicaRequest replicaRequest, Response finalResponse,
                                 ClusterStateObserver observer, ShardRouting originalPrimaryShard,
-                                InternalRequest internalRequest, ActionListener<Response> listener, Releasable indexShardReference,
+                                InternalRequest internalRequest, TransportChannel channel, Releasable indexShardReference,
                                 TimeValue shardFailedTimeout) {
             this.replicaRequest = replicaRequest;
-            this.listener = listener;
+            this.channel = channel;
             this.finalResponse = finalResponse;
             this.originalPrimaryShard = originalPrimaryShard;
             this.observer = observer;
@@ -953,7 +998,12 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
         private void forceFinishAsFailed(Throwable t) {
             if (finished.compareAndSet(false, true)) {
                 Releasables.close(indexShardReference);
-                listener.onFailure(t);
+                try {
+                    channel.sendResponse(t);
+                } catch (IOException responseException) {
+                    logger.warn("failed to send error message back to client for action [" + transportReplicaAction + "]", responseException);
+                    logger.warn("actual Exception", t);
+                }
             }
         }
 
@@ -981,7 +1031,11 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
 
                         )
                 );
-                listener.onResponse(finalResponse);
+                try {
+                    channel.sendResponse(finalResponse);
+                } catch (IOException responseException) {
+                    logger.warn("failed to send error message back to client for action [" + transportReplicaAction + "]", responseException);
+                }
             }
         }
 
@@ -1063,6 +1117,19 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
             }
         }
     }
+
+    protected static ShardRouting resolvePrimary(ShardIterator shardIt) {
+        // no shardIt, might be in the case between index gateway recovery and shardIt initialization
+        ShardRouting shard;
+        while ((shard = shardIt.nextOrNull()) != null) {
+            // we only deal with primary shardIt here...
+            if (shard.primary()) {
+                return shard;
+            }
+        }
+        return null;
+    }
+
 
     /** Utility method to create either an index or a create operation depending
      *  on the {@link OpType} of the request. */
