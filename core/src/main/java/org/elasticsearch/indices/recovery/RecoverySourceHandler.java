@@ -154,6 +154,10 @@ public class RecoverySourceHandler {
         return response;
     }
 
+    protected boolean isPrimaryRelocation() {
+        return request.recoveryType() == RecoveryState.Type.RELOCATION && shard.routingEntry().primary();
+    }
+
     /**
      * Perform phase1 of the recovery operations. Once this {@link IndexCommit}
      * snapshot has been performed no commit operations (files being fsync'd)
@@ -395,8 +399,7 @@ public class RecoverySourceHandler {
             }
         });
 
-
-        if (request.markAsRelocated()) {
+        if (request.markAsRelocated() || isPrimaryRelocation()) {
             // TODO what happens if the recovery process fails afterwards, we need to mark this back to started
             try {
                 shard.relocated("to " + request.targetNode());
@@ -404,6 +407,10 @@ public class RecoverySourceHandler {
                 // we can ignore this exception since, on the other node, when it moved to phase3
                 // it will also send shard started, which might cause the index shard we work against
                 // to move be closed by the time we get to the the relocated method
+            } finally {
+                if (isPrimaryRelocation()) {
+                    cancellableThreads.execute(shard::waitForPendingOperations);
+                }
             }
         }
         stopWatch.stop();

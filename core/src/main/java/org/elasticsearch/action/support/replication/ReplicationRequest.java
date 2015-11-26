@@ -44,6 +44,8 @@ public class ReplicationRequest<T extends ReplicationRequest> extends ActionRequ
 
     ShardId internalShardId;
 
+    boolean primaryRelocated = false;
+
     protected TimeValue timeout = DEFAULT_TIMEOUT;
     protected String index;
 
@@ -132,6 +134,14 @@ public class ReplicationRequest<T extends ReplicationRequest> extends ActionRequ
         return internalShardId;
     }
 
+    boolean primaryRelocated() {
+        return primaryRelocated;
+    }
+
+    void setPrimaryRelocated(boolean primaryRelocated) {
+        this.primaryRelocated = primaryRelocated;
+    }
+
     /**
      * Sets the consistency level of write. Defaults to {@link org.elasticsearch.action.WriteConsistencyLevel#DEFAULT}
      */
@@ -159,6 +169,7 @@ public class ReplicationRequest<T extends ReplicationRequest> extends ActionRequ
         consistencyLevel = WriteConsistencyLevel.fromId(in.readByte());
         timeout = TimeValue.readTimeValue(in);
         index = in.readString();
+        primaryRelocated = in.readBoolean();
     }
 
     @Override
@@ -168,6 +179,7 @@ public class ReplicationRequest<T extends ReplicationRequest> extends ActionRequ
         out.writeByte(consistencyLevel.id());
         timeout.writeTo(out);
         out.writeString(index);
+        out.writeBoolean(primaryRelocated);
     }
 
     public T setShardId(ShardId shardId) {

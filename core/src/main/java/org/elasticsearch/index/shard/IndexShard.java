@@ -1499,6 +1499,17 @@ public class IndexShard extends AbstractIndexShardComponent {
     }
 
     /**
+     * blocks indefinitely until pending operations complete
+     * @throws InterruptedException to interrupt
+     */
+    public void waitForPendingOperations() throws InterruptedException {
+        while (getOperationsCount() > 0) {
+            logger.info("--> {} sleeping for operation counter to reach 0", getOperationsCount());
+            Thread.sleep(100);
+        }
+    }
+
+    /**
      * Syncs the given location with the underlying storage unless already synced.
      */
     public void sync(Translog.Location location) {

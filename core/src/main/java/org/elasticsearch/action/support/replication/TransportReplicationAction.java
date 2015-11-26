@@ -58,6 +58,7 @@ import org.elasticsearch.index.engine.VersionConflictEngineException;
 import org.elasticsearch.index.mapper.Mapping;
 import org.elasticsearch.index.mapper.SourceToParse;
 import org.elasticsearch.index.shard.IndexShard;
+import org.elasticsearch.index.shard.IndexShardState;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.translog.Translog;
 import org.elasticsearch.indices.IndicesService;
@@ -380,20 +381,32 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
                 retryBecauseUnavailable(shardIt.shardId(), "No active shards.");
                 return;
             }
+            ShardId shardId = primary.shardId();
             if (primary.active() == false) {
-                logger.trace("primary shard [{}] is not yet active, scheduling a retry.", primary.shardId());
+                logger.trace("primary shard [{}] is not yet active, scheduling a retry.", shardId);
                 retryBecauseUnavailable(shardIt.shardId(), "Primary shard is not active or isn't assigned to a known node.");
                 return;
             }
             if (observer.observedState().nodes().nodeExists(primary.currentNodeId()) == false) {
-                logger.trace("primary shard [{}] is assigned to anode we do not know the node, scheduling a retry.", primary.shardId(), primary.currentNodeId());
+                logger.trace("primary shard [{}] is assigned to anode we do not know the node, scheduling a retry.", shardId, primary.currentNodeId());
                 retryBecauseUnavailable(shardIt.shardId(), "Primary shard is not active or isn't assigned to a known node.");
                 return;
             }
-            if (primary.currentNodeId().equals(observer.observedState().nodes().localNodeId())) {
-                performPrimary(primary);
+            final String localNodeId = observer.observedState().nodes().localNodeId();
+            if (primary.currentNodeId().equals(localNodeId)) {
+                IndexService indexService = indicesService.indexServiceSafe(shardId.getIndex());
+                IndexShard indexShard = indexService.getShard(shardId.id());
+                if (indexShard.state() == IndexShardState.RELOCATED) {
+                    internalRequest.request().setPrimaryRelocated(true);
+                    performReroute(primary.relocatingNodeId());
+                } else {
+                    performPrimary(primary.currentNodeId());
+                }
+            } else if (internalRequest.request().primaryRelocated() && primary.relocating()
+                    && primary.relocatingNodeId().equals(localNodeId)) {
+                performPrimary(primary.relocatingNodeId());
             } else {
-                performReroute(primary);
+                performReroute(primary.currentNodeId());
             }
         }
 
@@ -434,16 +447,17 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
             return true;
         }
 
-        protected void performReroute(final ShardRouting primary) {
-            performAction(primary, actionName);
+        protected void performReroute(final String nodeId) {
+            performAction(nodeId, actionName);
         }
 
-        protected void performPrimary(final ShardRouting primary) {
-            performAction(primary, transportPrimaryAction);
+        protected void performPrimary(final String nodeId) {
+            assert nodeId.equals(observer.observedState().nodes().localNodeId());
+            performAction(nodeId, transportPrimaryAction);
         }
 
-        private void performAction(final ShardRouting primary, String action) {
-            DiscoveryNode node = observer.observedState().nodes().get(primary.currentNodeId());
+        private void performAction(final String nodeId, String action) {
+            DiscoveryNode node = observer.observedState().nodes().get(nodeId);
             transportService.sendRequest(node, action, internalRequest.request(), transportOptions, new BaseTransportResponseHandler<Response>() {
 
                 @Override
@@ -571,9 +585,6 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
 
         @Override
         protected void doRun() throws Exception {
-            // TODO: we should invoke shards() only on ReroutePhase and
-            // pass the result along the request to the PrimaryPhase to
-            // decouple the logic further
             final ShardIterator shardIt = shards(observer.observedState(), internalRequest);
             final ShardRouting primary = resolvePrimary(shardIt);
             if (primary == null) {
@@ -585,17 +596,24 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
                 finishBecauseUnavailable(shardIt.shardId(), "Primary shard is not active or isn't assigned to a known node.");
                 return;
             }
-            if (observer.observedState().nodes().nodeExists(primary.currentNodeId()) == false) {
+            if (primary.relocating() && observer.observedState().nodes().nodeExists(primary.relocatingNodeId()) == false) {
+                logger.trace("primary shard [{}] is assigned to anode we do not know the node, scheduling a retry.", primary.shardId(), primary.currentNodeId());
+                finishBecauseUnavailable(shardIt.shardId(), "Primary shard is not active or isn't assigned to a known node.");
+                return;
+            } else if (primary.relocating() == false && observer.observedState().nodes().nodeExists(primary.currentNodeId()) == false) {
                 logger.trace("primary shard [{}] is assigned to anode we do not know the node, scheduling a retry.", primary.shardId(), primary.currentNodeId());
                 finishBecauseUnavailable(shardIt.shardId(), "Primary shard is not active or isn't assigned to a known node.");
                 return;
             }
-            if (primary.currentNodeId().equals(observer.observedState().nodes().localNodeId()) == false) {
+            if (primary.relocating() && primary.currentNodeId().equals(observer.observedState().nodes().localNodeId()) == false) {
+                logger.trace("primary shard [{}] is assigned to another node, scheduling a retry.", primary.shardId(), primary.currentNodeId());
+                finishBecauseUnavailable(shardIt.shardId(), "Primary shard is assigned to another node.");
+                return;
+            } else if (primary.relocating() == false && primary.currentNodeId().equals(observer.observedState().nodes().localNodeId()) == false) {
                 logger.trace("primary shard [{}] is assigned to another node, scheduling a retry.", primary.shardId(), primary.currentNodeId());
                 finishBecauseUnavailable(shardIt.shardId(), "Primary shard is assigned to another node.");
                 return;
             }
-
             performPrimary(primary, shardIt);
         }
 
@@ -801,7 +819,7 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
                             // there is a new primary, we'll have to replicate to it.
                             numberOfPendingShardInstances++;
                         }
-                        if (shard.relocating()) {
+                        if (shard.relocating() && originalPrimaryShard.currentNodeId().equals(shard.relocatingNodeId()) == false) {
                             numberOfPendingShardInstances++;
                         }
                     } else if (shouldExecuteReplication(indexMetaData.getSettings()) == false) {
@@ -830,7 +848,7 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
                     if (shard.unassigned()) {
                         numberOfUnassignedOrIgnoredReplicas++;
                     } else if (shard.primary()) {
-                        if (shard.relocating()) {
+                        if (shard.relocating() && originalPrimaryShard.currentNodeId().equals(shard.relocatingNodeId()) == false) {
                             // we have to replicate to the other copy
                             numberOfPendingShardInstances += 1;
                         }
@@ -910,7 +928,7 @@ public abstract class TransportReplicationAction<Request extends ReplicationRequ
                         // there is a new primary, we'll have to replicate to it.
                         performOnReplica(shard, shard.currentNodeId());
                     }
-                    if (shard.relocating()) {
+                    if (shard.relocating() && originalPrimaryShard.currentNodeId().equals(shard.relocatingNodeId()) == false) {
                         performOnReplica(shard, shard.relocatingNodeId());
                     }
                 } else if (shouldExecuteReplication(indexMetaData.getSettings())) {

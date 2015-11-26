@@ -54,6 +54,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.DummyTransportAddress;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
+import org.elasticsearch.common.util.concurrent.CountDown;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.env.Environment;
@@ -91,9 +92,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.BrokenBarrierException;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.elasticsearch.cluster.metadata.IndexMetaData.*;
@@ -329,6 +328,28 @@ public class IndexShardTests extends ESSingleNodeTestCase {
         indexShard.decrementOperationCounter();
         indexShard.decrementOperationCounter();
         assertEquals(0, indexShard.getOperationsCount());
+    }
+
+    public void testWaitForOperations() throws InterruptedException {
+        assertAcked(client().admin().indices().prepareCreate("test").setSettings(Settings.builder().put("index.number_of_shards", 1).put("index.number_of_replicas", 0)).get());
+        ensureGreen("test");
+        IndicesService indicesService = getInstanceFromNode(IndicesService.class);
+        IndexService indexService = indicesService.indexServiceSafe("test");
+        final IndexShard indexShard = indexService.getShardOrNull(0);
+        assertEquals(0, indexShard.getOperationsCount());
+        indexShard.incrementOperationCounter();
+        AtomicBoolean success = new AtomicBoolean(false);
+        new Thread(() -> {
+            try {
+                indexShard.waitForPendingOperations();
+                success.set(true);
+            } catch (InterruptedException ignored) {
+                success.set(false);
+            }
+        }).start();
+        assertThat(success.get(), equalTo(false));
+        indexShard.decrementOperationCounter();
+        assertThat(awaitBusy(success::get), equalTo(true));
     }
 
     public void testMarkAsInactiveTriggersSyncedFlush() throws Exception {
