@@ -41,6 +41,11 @@ public interface ClusterService extends LifecycleComponent<ClusterService> {
     DiscoveryNode localNode();
 
     /**
+     * Registered local custom meta data types
+     */
+    List<String> localCustomMetaDataTypes();
+
+    /**
      * The current state.
      */
     ClusterState state();

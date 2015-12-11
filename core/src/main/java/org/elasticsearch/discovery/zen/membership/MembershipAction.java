@@ -31,6 +31,8 @@ import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.*;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -49,9 +51,9 @@ public class MembershipAction extends AbstractComponent {
     }
 
     public static interface MembershipListener {
-        void onJoin(DiscoveryNode node, JoinCallback callback);
+        void onJoin(JoinRequest request, JoinCallback callback);
 
-        void onLeave(DiscoveryNode node);
+        void onLeave(LeaveRequest request);
     }
 
     private final TransportService transportService;
@@ -88,12 +90,8 @@ public class MembershipAction extends AbstractComponent {
         transportService.submitRequest(masterNode, DISCOVERY_LEAVE_ACTION_NAME, new LeaveRequest(node), EmptyTransportResponseHandler.INSTANCE_SAME).txGet(timeout.millis(), TimeUnit.MILLISECONDS);
     }
 
-    public void sendJoinRequest(DiscoveryNode masterNode, DiscoveryNode node) {
-        transportService.sendRequest(masterNode, DISCOVERY_JOIN_ACTION_NAME, new JoinRequest(node), EmptyTransportResponseHandler.INSTANCE_SAME);
-    }
-
-    public void sendJoinRequestBlocking(DiscoveryNode masterNode, DiscoveryNode node, TimeValue timeout) {
-        transportService.submitRequest(masterNode, DISCOVERY_JOIN_ACTION_NAME, new JoinRequest(node), EmptyTransportResponseHandler.INSTANCE_SAME)
+    public void sendJoinRequestBlocking(DiscoveryNode masterNode, DiscoveryNode node, List<String> customMetaDataTypes, TimeValue timeout) {
+        transportService.submitRequest(masterNode, DISCOVERY_JOIN_ACTION_NAME, new JoinRequest(node, customMetaDataTypes), EmptyTransportResponseHandler.INSTANCE_SAME)
                 .txGet(timeout.millis(), TimeUnit.MILLISECONDS);
     }
 
@@ -107,25 +105,44 @@ public class MembershipAction extends AbstractComponent {
 
     public static class JoinRequest extends TransportRequest {
 
-        DiscoveryNode node;
+        private DiscoveryNode node;
+        private List<String> customMetaDataTypes;
 
         public JoinRequest() {
         }
 
-        private JoinRequest(DiscoveryNode node) {
+        public JoinRequest(DiscoveryNode node, List<String> customMetaDataTypes) {
             this.node = node;
+            this.customMetaDataTypes = customMetaDataTypes;
+        }
+
+        public DiscoveryNode getNode() {
+            return node;
+        }
+
+        public List<String> getCustomMetaDataTypes() {
+            return customMetaDataTypes;
         }
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
             super.readFrom(in);
             node = DiscoveryNode.readNode(in);
+            int size = in.readVInt();
+            this.customMetaDataTypes = new ArrayList<>(size);
+            for (int i = 0; i < size; i++) {
+                customMetaDataTypes.add(in.readString());
+            }
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
             super.writeTo(out);
             node.writeTo(out);
+            out.writeVInt(customMetaDataTypes.size());
+            for (String custom : customMetaDataTypes) {
+                out.writeString(custom);
+            }
         }
     }
 
@@ -134,7 +151,7 @@ public class MembershipAction extends AbstractComponent {
 
         @Override
         public void messageReceived(final JoinRequest request, final TransportChannel channel) throws Exception {
-            listener.onJoin(request.node, new JoinCallback() {
+            listener.onJoin(request, new JoinCallback() {
                 @Override
                 public void onSuccess() {
                     try {
@@ -182,6 +199,10 @@ public class MembershipAction extends AbstractComponent {
             this.node = node;
         }
 
+        public DiscoveryNode getNode() {
+            return node;
+        }
+
         @Override
         public void readFrom(StreamInput in) throws IOException {
             super.readFrom(in);
@@ -199,7 +220,7 @@ public class MembershipAction extends AbstractComponent {
 
         @Override
         public void messageReceived(LeaveRequest request, TransportChannel channel) throws Exception {
-            listener.onLeave(request.node);
+            listener.onLeave(request);
             channel.sendResponse(TransportResponse.Empty.INSTANCE);
         }
     }

@@ -463,7 +463,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
         while (true) {
             try {
                 logger.trace("joining master {}", masterNode);
-                membership.sendJoinRequestBlocking(masterNode, clusterService.localNode(), joinTimeout);
+                membership.sendJoinRequestBlocking(masterNode, clusterService.localNode(), clusterService.localCustomMetaDataTypes(), joinTimeout);
                 return true;
             } catch (Throwable t) {
                 Throwable unwrap = ExceptionsHelper.unwrapCause(t);
@@ -492,7 +492,8 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
         }
     }
 
-    private void handleLeaveRequest(final DiscoveryNode node) {
+    private void handleLeaveRequest(final MembershipAction.LeaveRequest request) {
+        final DiscoveryNode node = request.getNode();
         if (lifecycleState() != Lifecycle.State.STARTED) {
             // not started, ignore a node failure
             return;
@@ -824,8 +825,8 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
         }
     }
 
-    void handleJoinRequest(final DiscoveryNode node, final MembershipAction.JoinCallback callback) {
-
+    void handleJoinRequest(final MembershipAction.JoinRequest request, final MembershipAction.JoinCallback callback) {
+        final DiscoveryNode node = request.getNode();
         if (!transportService.addressSupported(node.address().getClass())) {
             // TODO, what should we do now? Maybe inform that node that its crap?
             logger.warn("received a wrong address type from [{}], ignoring...", node);
@@ -837,7 +838,14 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
             // Sanity check: maybe we don't end up here, because serialization may have failed.
             if (node.getVersion().before(minimumNodeJoinVersion)) {
                 callback.onFailure(
-                        new IllegalStateException("Can't handle join request from a node with a version [" + node.getVersion() + "] that is lower than the minimum compatible version [" + minimumNodeJoinVersion.minimumCompatibilityVersion() + "]")
+                    new IllegalStateException("Can't handle join request from a node with a version [" + node.getVersion() + "] that is lower than the minimum compatible version [" + minimumNodeJoinVersion.minimumCompatibilityVersion() + "]")
+                );
+                return;
+            }
+            List<String> masterCustomMetaDataTypes = clusterService.localCustomMetaDataTypes();
+            if (masterCustomMetaDataTypes.equals(request.getCustomMetaDataTypes()) == false) {
+                callback.onFailure(
+                    new IllegalStateException("Can't handle join request from a node with custom meta date types " + request.getCustomMetaDataTypes() + " when master has " + masterCustomMetaDataTypes + " custom meta data types")
                 );
                 return;
             }
@@ -1026,13 +1034,13 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
 
     private class MembershipListener implements MembershipAction.MembershipListener {
         @Override
-        public void onJoin(DiscoveryNode node, MembershipAction.JoinCallback callback) {
-            handleJoinRequest(node, callback);
+        public void onJoin(MembershipAction.JoinRequest request, MembershipAction.JoinCallback callback) {
+            handleJoinRequest(request, callback);
         }
 
         @Override
-        public void onLeave(DiscoveryNode node) {
-            handleLeaveRequest(node);
+        public void onLeave(MembershipAction.LeaveRequest request) {
+            handleLeaveRequest(request);
         }
     }
 

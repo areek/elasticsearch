@@ -21,6 +21,7 @@ package org.elasticsearch.test.cluster;
 import org.elasticsearch.Version;
 import org.elasticsearch.cluster.*;
 import org.elasticsearch.cluster.block.ClusterBlock;
+import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.OperationRouting;
@@ -30,6 +31,8 @@ import org.elasticsearch.common.component.LifecycleListener;
 import org.elasticsearch.common.transport.DummyTransportAddress;
 import org.elasticsearch.common.unit.TimeValue;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class NoopClusterService implements ClusterService {
@@ -56,6 +59,13 @@ public class NoopClusterService implements ClusterService {
     @Override
     public DiscoveryNode localNode() {
         return state.getNodes().localNode();
+    }
+
+    @Override
+    public List<String> localCustomMetaDataTypes() {
+        List<String> customMetaDataList = new ArrayList<>(MetaData.customPrototypes.keySet());
+        Collections.sort(customMetaDataList);
+        return customMetaDataList;
     }
 
     @Override

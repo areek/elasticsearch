@@ -58,6 +58,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -228,6 +229,30 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
         assertThat(ExceptionsHelper.detailedMessage(reference.get()), containsString("cluster state from a different master than the current one, rejecting"));
     }
 
+    public void testHandleNodeJoin_incompatibleCustomMetaDataTypes() throws UnknownHostException {
+        Settings nodeSettings = Settings.settingsBuilder()
+            .put("discovery.type", "zen") // <-- To override the local setting if set externally
+            .build();
+        String nodeName = internalCluster().startNode(nodeSettings);
+        ZenDiscovery zenDiscovery = (ZenDiscovery) internalCluster().getInstance(Discovery.class, nodeName);
+
+        DiscoveryNode node = new DiscoveryNode("_node_id", new InetSocketTransportAddress(InetAddress.getByName("0.0.0.0"), 0), Version.CURRENT);
+        final AtomicReference<IllegalStateException> holder = new AtomicReference<>();
+        zenDiscovery.handleJoinRequest(new MembershipAction.JoinRequest(node, Arrays.asList("repositories", "unknown_metadata_type")), new MembershipAction.JoinCallback() {
+            @Override
+            public void onSuccess() {
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                holder.set((IllegalStateException) t);
+            }
+        });
+
+        assertThat(holder.get(), notNullValue());
+        assertThat(holder.get().getMessage(), equalTo("Can't handle join request from a node with custom meta date types [repositories, unknown_metadata_type] when master has [repositories] custom meta data types"));
+    }
+
     public void testHandleNodeJoin_incompatibleMinVersion() throws UnknownHostException {
         Settings nodeSettings = Settings.settingsBuilder()
                 .put("discovery.type", "zen") // <-- To override the local setting if set externally
@@ -237,7 +262,7 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
 
         DiscoveryNode node = new DiscoveryNode("_node_id", new InetSocketTransportAddress(InetAddress.getByName("0.0.0.0"), 0), Version.V_1_6_0);
         final AtomicReference<IllegalStateException> holder = new AtomicReference<>();
-        zenDiscovery.handleJoinRequest(node, new MembershipAction.JoinCallback() {
+        zenDiscovery.handleJoinRequest(new MembershipAction.JoinRequest(node, Collections.singletonList("repositories")), new MembershipAction.JoinCallback() {
             @Override
             public void onSuccess() {
             }
