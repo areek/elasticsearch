@@ -463,7 +463,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
         while (true) {
             try {
                 logger.trace("joining master {}", masterNode);
-                membership.sendJoinRequestBlocking(masterNode, clusterService.localNode(), clusterService.localCustomMetaDataTypes(), joinTimeout);
+                membership.sendJoinRequestBlocking(masterNode, clusterService.localNode(), joinTimeout);
                 return true;
             } catch (Throwable t) {
                 Throwable unwrap = ExceptionsHelper.unwrapCause(t);
@@ -492,7 +492,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
         }
     }
 
-    private void handleLeaveRequest(final MembershipAction.LeaveRequest request) {
+    void handleLeaveRequest(final MembershipAction.LeaveRequest request) {
         final DiscoveryNode node = request.getNode();
         if (lifecycleState() != Lifecycle.State.STARTED) {
             // not started, ignore a node failure
@@ -825,7 +825,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
         }
     }
 
-    void handleJoinRequest(final MembershipAction.JoinRequest request, final MembershipAction.JoinCallback callback) {
+    void handleJoinRequest(final MembershipAction.JoinRequest request, final ClusterState state, final MembershipAction.JoinCallback callback) {
         final DiscoveryNode node = request.getNode();
         if (!transportService.addressSupported(node.address().getClass())) {
             // TODO, what should we do now? Maybe inform that node that its crap?
@@ -842,20 +842,18 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
                 );
                 return;
             }
-            List<String> masterCustomMetaDataTypes = clusterService.localCustomMetaDataTypes();
-            if (masterCustomMetaDataTypes.equals(request.getCustomMetaDataTypes()) == false) {
-                callback.onFailure(
-                    new IllegalStateException("Can't handle join request from a node with custom meta date types " + request.getCustomMetaDataTypes() + " when master has " + masterCustomMetaDataTypes + " custom meta data types")
-                );
-                return;
-            }
 
             // try and connect to the node, if it fails, we can raise an exception back to the client...
             transportService.connectToNode(node);
 
             // validate the join request, will throw a failure if it fails, which will get back to the
             // node calling the join request
-            membership.sendValidateJoinRequestBlocking(node, joinTimeout);
+            try {
+                membership.sendValidateJoinRequestBlocking(node, state, joinTimeout);
+            } catch (Throwable e) {
+                callback.onFailure(new IllegalStateException("Can't handle join request from node [" + node + "], probable cause missing plugins", ExceptionsHelper.unwrapCause(e)));
+                return;
+            }
             nodeJoinController.handleJoinRequest(node, callback);
         }
     }
@@ -1035,7 +1033,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
     private class MembershipListener implements MembershipAction.MembershipListener {
         @Override
         public void onJoin(MembershipAction.JoinRequest request, MembershipAction.JoinCallback callback) {
-            handleJoinRequest(request, callback);
+            handleJoinRequest(request, clusterService.state(), callback);
         }
 
         @Override

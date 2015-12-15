@@ -189,13 +189,6 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
     }
 
     @Override
-    public List<String> localCustomMetaDataTypes() {
-        List<String> customMetaDataList = new ArrayList<>(MetaData.customPrototypes.keySet());
-        Collections.sort(customMetaDataList);
-        return customMetaDataList;
-    }
-
-    @Override
     public OperationRouting operationRouting() {
         return operationRouting;
     }

@@ -24,14 +24,14 @@ import org.elasticsearch.Version;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsResponse;
 import org.elasticsearch.action.admin.indices.recovery.RecoveryResponse;
-import org.elasticsearch.cluster.ClusterChangedEvent;
-import org.elasticsearch.cluster.ClusterService;
-import org.elasticsearch.cluster.ClusterState;
-import org.elasticsearch.cluster.ClusterStateListener;
+import org.elasticsearch.cluster.*;
+import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.transport.LocalTransportAddress;
@@ -44,6 +44,7 @@ import org.elasticsearch.discovery.zen.elect.ElectMasterService;
 import org.elasticsearch.discovery.zen.fd.FaultDetection;
 import org.elasticsearch.discovery.zen.membership.MembershipAction;
 import org.elasticsearch.discovery.zen.publish.PublishClusterStateAction;
+import org.elasticsearch.snapshots.DedicatedClusterSnapshotRestoreIT;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -57,10 +58,7 @@ import org.hamcrest.Matchers;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -229,16 +227,22 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
         assertThat(ExceptionsHelper.detailedMessage(reference.get()), containsString("cluster state from a different master than the current one, rejecting"));
     }
 
-    public void testHandleNodeJoin_incompatibleCustomMetaDataTypes() throws UnknownHostException {
+    public void testHandleNodeJoin_incompatibleClusterState() throws UnknownHostException {
         Settings nodeSettings = Settings.settingsBuilder()
             .put("discovery.type", "zen") // <-- To override the local setting if set externally
             .build();
-        String nodeName = internalCluster().startNode(nodeSettings);
-        ZenDiscovery zenDiscovery = (ZenDiscovery) internalCluster().getInstance(Discovery.class, nodeName);
+        String masterOnlyNode = internalCluster().startMasterOnlyNode(nodeSettings);
+        String node1 = internalCluster().startNode(nodeSettings);
+        ZenDiscovery zenDiscovery = (ZenDiscovery) internalCluster().getInstance(Discovery.class, masterOnlyNode);
+        ClusterService clusterService = internalCluster().getInstance(ClusterService.class, node1);
+        final ClusterState state = clusterService.state();
+        MetaData.Builder mdBuilder = MetaData.builder(state.metaData());
+        mdBuilder.putCustom(CustomMetaData.TYPE, new CustomMetaData("data"));
+        ClusterState stateWithCustomMetaData = ClusterState.builder(state).metaData(mdBuilder).build();
 
-        DiscoveryNode node = new DiscoveryNode("_node_id", new InetSocketTransportAddress(InetAddress.getByName("0.0.0.0"), 0), Version.CURRENT);
         final AtomicReference<IllegalStateException> holder = new AtomicReference<>();
-        zenDiscovery.handleJoinRequest(new MembershipAction.JoinRequest(node, Arrays.asList("repositories", "unknown_metadata_type")), new MembershipAction.JoinCallback() {
+        DiscoveryNode node = state.nodes().localNode();
+        zenDiscovery.handleJoinRequest(new MembershipAction.JoinRequest(node), stateWithCustomMetaData, new MembershipAction.JoinCallback() {
             @Override
             public void onSuccess() {
             }
@@ -250,7 +254,30 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
         });
 
         assertThat(holder.get(), notNullValue());
-        assertThat(holder.get().getMessage(), equalTo("Can't handle join request from a node with custom meta date types [repositories, unknown_metadata_type] when master has [repositories] custom meta data types"));
+        assertThat(holder.get().getMessage(), equalTo("Can't handle join request from node [" + node + "], probable cause missing plugins"));
+    }
+
+    public static class CustomMetaData extends DedicatedClusterSnapshotRestoreIT.TestCustomMetaData {
+        public static final String TYPE = "custom_md";
+
+        CustomMetaData(String data) {
+            super(data);
+        }
+
+        @Override
+        protected DedicatedClusterSnapshotRestoreIT.TestCustomMetaData newTestCustomMetaData(String data) {
+            return new CustomMetaData(data);
+        }
+
+        @Override
+        public String type() {
+            return TYPE;
+        }
+
+        @Override
+        public EnumSet<MetaData.XContentContext> context() {
+            return EnumSet.of(MetaData.XContentContext.GATEWAY, MetaData.XContentContext.SNAPSHOT);
+        }
     }
 
     public void testHandleNodeJoin_incompatibleMinVersion() throws UnknownHostException {
@@ -259,10 +286,10 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
                 .build();
         String nodeName = internalCluster().startNode(nodeSettings, Version.V_2_0_0_beta1);
         ZenDiscovery zenDiscovery = (ZenDiscovery) internalCluster().getInstance(Discovery.class, nodeName);
-
+        ClusterService clusterService = internalCluster().getInstance(ClusterService.class, nodeName);
         DiscoveryNode node = new DiscoveryNode("_node_id", new InetSocketTransportAddress(InetAddress.getByName("0.0.0.0"), 0), Version.V_1_6_0);
         final AtomicReference<IllegalStateException> holder = new AtomicReference<>();
-        zenDiscovery.handleJoinRequest(new MembershipAction.JoinRequest(node, Collections.singletonList("repositories")), new MembershipAction.JoinCallback() {
+        zenDiscovery.handleJoinRequest(new MembershipAction.JoinRequest(node), clusterService.state(), new MembershipAction.JoinCallback() {
             @Override
             public void onSuccess() {
             }
