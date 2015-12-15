@@ -492,8 +492,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
         }
     }
 
-    void handleLeaveRequest(final MembershipAction.LeaveRequest request) {
-        final DiscoveryNode node = request.getNode();
+    void handleLeaveRequest(final DiscoveryNode node) {
         if (lifecycleState() != Lifecycle.State.STARTED) {
             // not started, ignore a node failure
             return;
@@ -825,8 +824,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
         }
     }
 
-    void handleJoinRequest(final MembershipAction.JoinRequest request, final ClusterState state, final MembershipAction.JoinCallback callback) {
-        final DiscoveryNode node = request.getNode();
+    void handleJoinRequest(final DiscoveryNode node, final ClusterState state, final MembershipAction.JoinCallback callback) {
         if (!transportService.addressSupported(node.address().getClass())) {
             // TODO, what should we do now? Maybe inform that node that its crap?
             logger.warn("received a wrong address type from [{}], ignoring...", node);
@@ -1032,13 +1030,13 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
 
     private class MembershipListener implements MembershipAction.MembershipListener {
         @Override
-        public void onJoin(MembershipAction.JoinRequest request, MembershipAction.JoinCallback callback) {
-            handleJoinRequest(request, clusterService.state(), callback);
+        public void onJoin(DiscoveryNode node, MembershipAction.JoinCallback callback) {
+            handleJoinRequest(node, clusterService.state(), callback);
         }
 
         @Override
-        public void onLeave(MembershipAction.LeaveRequest request) {
-            handleLeaveRequest(request);
+        public void onLeave(DiscoveryNode node) {
+            handleLeaveRequest(node);
         }
     }
 

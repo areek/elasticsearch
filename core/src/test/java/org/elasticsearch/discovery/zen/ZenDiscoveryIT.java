@@ -242,7 +242,7 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
 
         final AtomicReference<IllegalStateException> holder = new AtomicReference<>();
         DiscoveryNode node = state.nodes().localNode();
-        zenDiscovery.handleJoinRequest(new MembershipAction.JoinRequest(node), stateWithCustomMetaData, new MembershipAction.JoinCallback() {
+        zenDiscovery.handleJoinRequest(node, stateWithCustomMetaData, new MembershipAction.JoinCallback() {
             @Override
             public void onSuccess() {
             }
@@ -289,7 +289,7 @@ public class ZenDiscoveryIT extends ESIntegTestCase {
         ClusterService clusterService = internalCluster().getInstance(ClusterService.class, nodeName);
         DiscoveryNode node = new DiscoveryNode("_node_id", new InetSocketTransportAddress(InetAddress.getByName("0.0.0.0"), 0), Version.V_1_6_0);
         final AtomicReference<IllegalStateException> holder = new AtomicReference<>();
-        zenDiscovery.handleJoinRequest(new MembershipAction.JoinRequest(node), clusterService.state(), new MembershipAction.JoinCallback() {
+        zenDiscovery.handleJoinRequest(node, clusterService.state(), new MembershipAction.JoinCallback() {
             @Override
             public void onSuccess() {
             }

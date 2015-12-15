@@ -32,8 +32,6 @@ import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.*;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -52,9 +50,9 @@ public class MembershipAction extends AbstractComponent {
     }
 
     public static interface MembershipListener {
-        void onJoin(JoinRequest request, JoinCallback callback);
+        void onJoin(DiscoveryNode node, JoinCallback callback);
 
-        void onLeave(LeaveRequest request);
+        void onLeave(DiscoveryNode node);
     }
 
     private final TransportService transportService;
@@ -115,10 +113,6 @@ public class MembershipAction extends AbstractComponent {
             this.node = node;
         }
 
-        public DiscoveryNode getNode() {
-            return node;
-        }
-
         @Override
         public void readFrom(StreamInput in) throws IOException {
             super.readFrom(in);
@@ -137,7 +131,7 @@ public class MembershipAction extends AbstractComponent {
 
         @Override
         public void messageReceived(final JoinRequest request, final TransportChannel channel) throws Exception {
-            listener.onJoin(request, new JoinCallback() {
+            listener.onJoin(request.node, new JoinCallback() {
                 @Override
                 public void onSuccess() {
                     try {
@@ -202,10 +196,6 @@ public class MembershipAction extends AbstractComponent {
             this.node = node;
         }
 
-        public DiscoveryNode getNode() {
-            return node;
-        }
-
         @Override
         public void readFrom(StreamInput in) throws IOException {
             super.readFrom(in);
@@ -223,7 +213,7 @@ public class MembershipAction extends AbstractComponent {
 
         @Override
         public void messageReceived(LeaveRequest request, TransportChannel channel) throws Exception {
-            listener.onLeave(request);
+            listener.onLeave(request.node);
             channel.sendResponse(TransportResponse.Empty.INSTANCE);
         }
     }
