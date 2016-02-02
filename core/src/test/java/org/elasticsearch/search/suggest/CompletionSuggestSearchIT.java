@@ -47,7 +47,7 @@ import org.elasticsearch.search.sort.FieldSortBuilder;
 import org.elasticsearch.search.suggest.completion.CompletionStats;
 import org.elasticsearch.search.suggest.completion.CompletionSuggestion;
 import org.elasticsearch.search.suggest.completion.CompletionSuggestionBuilder;
-import org.elasticsearch.search.suggest.completion.CompletionSuggestionBuilder.FuzzyOptionsBuilder;
+import org.elasticsearch.search.suggest.completion.FuzzyOptions;
 import org.elasticsearch.search.suggest.completion.context.CategoryContextMapping;
 import org.elasticsearch.search.suggest.completion.context.ContextMapping;
 import org.elasticsearch.search.suggest.completion.context.GeoContextMapping;
@@ -702,7 +702,7 @@ public class CompletionSuggestSearchIT extends ESIntegTestCase {
         refresh();
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nriv", new FuzzyOptionsBuilder().setTranspositions(false)).size(10)
+                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nriv", FuzzyOptions.builder().setTranspositions(false).build()).size(10)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo");
 
@@ -724,12 +724,12 @@ public class CompletionSuggestSearchIT extends ESIntegTestCase {
         refresh();
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nriva", new FuzzyOptionsBuilder().setFuzzyMinLength(6)).size(10)
+                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nriva", FuzzyOptions.builder().setFuzzyMinLength(6).build()).size(10)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo");
 
         suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nrivan", new FuzzyOptionsBuilder().setFuzzyMinLength(6)).size(10)
+                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nrivan", FuzzyOptions.builder().setFuzzyMinLength(6).build()).size(10)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "Nirvana");
     }
@@ -746,12 +746,12 @@ public class CompletionSuggestSearchIT extends ESIntegTestCase {
         refresh();
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nirw", new FuzzyOptionsBuilder().setFuzzyPrefixLength(4)).size(10)
+                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nirw", FuzzyOptions.builder().setFuzzyPrefixLength(4).build()).size(10)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo");
 
         suggestResponse = client().prepareSuggest(INDEX).addSuggestion(
-                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nirvo", new FuzzyOptionsBuilder().setFuzzyPrefixLength(4)).size(10)
+                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("Nirvo", FuzzyOptions.builder().setFuzzyPrefixLength(4).build()).size(10)
         ).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "Nirvana");
     }
@@ -769,18 +769,18 @@ public class CompletionSuggestSearchIT extends ESIntegTestCase {
 
         // suggestion with a character, which needs unicode awareness
         org.elasticsearch.search.suggest.completion.CompletionSuggestionBuilder completionSuggestionBuilder =
-                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("öööи", new FuzzyOptionsBuilder().setUnicodeAware(true)).size(10);
+                SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("öööи", FuzzyOptions.builder().setUnicodeAware(true).build()).size(10);
 
         SuggestResponse suggestResponse = client().prepareSuggest(INDEX).addSuggestion(completionSuggestionBuilder).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "ööööö");
 
         // removing unicode awareness leads to no result
-        completionSuggestionBuilder = SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("öööи", new FuzzyOptionsBuilder().setUnicodeAware(false)).size(10);
+        completionSuggestionBuilder = SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("öööи", FuzzyOptions.builder().setUnicodeAware(false).build()).size(10);
         suggestResponse = client().prepareSuggest(INDEX).addSuggestion(completionSuggestionBuilder).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo");
 
         // increasing edit distance instead of unicode awareness works again, as this is only a single character
-        completionSuggestionBuilder = SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("öööи", new FuzzyOptionsBuilder().setUnicodeAware(false).setFuzziness(Fuzziness.TWO)).size(10);
+        completionSuggestionBuilder = SuggestBuilders.completionSuggestion("foo").field(FIELD).prefix("öööи", FuzzyOptions.builder().setUnicodeAware(false).setFuzziness(Fuzziness.TWO).build()).size(10);
         suggestResponse = client().prepareSuggest(INDEX).addSuggestion(completionSuggestionBuilder).execute().actionGet();
         assertSuggestions(suggestResponse, false, "foo", "ööööö");
     }

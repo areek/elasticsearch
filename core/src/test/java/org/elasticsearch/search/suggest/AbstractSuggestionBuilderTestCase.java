@@ -23,6 +23,7 @@ import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.io.stream.NamedWriteableAwareStreamInput;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.search.suggest.completion.CompletionSuggestionBuilder;
 import org.elasticsearch.search.suggest.phrase.PhraseSuggestionBuilder;
 import org.elasticsearch.test.ESTestCase;
 import org.junit.AfterClass;
@@ -47,6 +48,7 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
     public static void init() {
         namedWriteableRegistry = new NamedWriteableRegistry();
         namedWriteableRegistry.registerPrototype(SuggestionBuilder.class, PhraseSuggestionBuilder.PROTOTYPE);
+        namedWriteableRegistry.registerPrototype(SuggestionBuilder.class, CompletionSuggestionBuilder.PROTOTYPE);
     }
 
     @AfterClass
@@ -166,7 +168,8 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
         }
     }
 
-    protected static <T> void maybeSet(Consumer<T> consumer, T value) {
+    // TODO: move this to ESTestCase?
+    public static <T> void maybeSet(Consumer<T> consumer, T value) {
         if (randomBoolean()) {
             consumer.accept(value);
         }

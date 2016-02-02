@@ -39,6 +39,7 @@ import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.functionscore.ScoreFunctionBuilder;
 import org.elasticsearch.search.rescore.RescoreBuilder;
 import org.elasticsearch.search.suggest.SuggestionBuilder;
+import org.elasticsearch.search.suggest.completion.context.QueryContext;
 import org.elasticsearch.search.suggest.phrase.PhraseSuggestionBuilder.SmoothingModel;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
@@ -698,6 +699,13 @@ public abstract class StreamInput extends InputStream {
      */
     public SuggestionBuilder<?> readSuggestion() throws IOException {
         return readNamedWriteable(SuggestionBuilder.class);
+    }
+
+    /**
+     * Reads a completion {@link QueryContext} from the current stream
+     */
+    public QueryContext readCompletionSuggestionQueryContext() throws IOException {
+        return readNamedWriteable(QueryContext.class);
     }
 
     /**
