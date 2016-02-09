@@ -66,7 +66,6 @@ DEFAULT_PLUGINS = ["analysis-icu",
                    "discovery-azure",
                    "discovery-ec2",
                    "discovery-gce",
-                   "discovery-multicast",
                    "lang-javascript",
                    "lang-painless",
                    "lang-python",
@@ -179,7 +178,7 @@ def smoke_test_release(release, files, expected_hash, plugins):
       continue # nothing to do here
     es_run_path = os.path.join(tmp_dir, 'elasticsearch-%s' % (release), 'bin/elasticsearch')
     print('  Smoke testing package [%s]' % release_file)
-    es_plugin_path = os.path.join(tmp_dir, 'elasticsearch-%s' % (release), 'bin/plugin')
+    es_plugin_path = os.path.join(tmp_dir, 'elasticsearch-%s' % (release), 'bin/elasticsearch-plugin')
     plugin_names = {}
     for plugin  in plugins:
       print('     Install plugin [%s]' % (plugin))

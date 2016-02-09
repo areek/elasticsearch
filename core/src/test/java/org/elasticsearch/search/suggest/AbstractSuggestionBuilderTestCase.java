@@ -19,17 +19,28 @@
 
 package org.elasticsearch.search.suggest;
 
+import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.io.stream.NamedWriteableAwareStreamInput;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.xcontent.ToXContent;
+import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentFactory;
+import org.elasticsearch.common.xcontent.XContentHelper;
+import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.common.xcontent.XContentType;
+import org.elasticsearch.index.query.QueryParseContext;
 import org.elasticsearch.search.suggest.completion.CompletionSuggestionBuilder;
 import org.elasticsearch.search.suggest.phrase.PhraseSuggestionBuilder;
+import org.elasticsearch.search.suggest.term.TermSuggestionBuilder;
 import org.elasticsearch.test.ESTestCase;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -40,6 +51,7 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
 
     private static final int NUMBER_OF_TESTBUILDERS = 20;
     protected static NamedWriteableRegistry namedWriteableRegistry;
+    private static final Suggesters suggesters = new Suggesters(Collections.emptyMap(), null, null);
 
     /**
      * setup for the whole base test class
@@ -47,6 +59,7 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
     @BeforeClass
     public static void init() {
         namedWriteableRegistry = new NamedWriteableRegistry();
+        namedWriteableRegistry.registerPrototype(SuggestionBuilder.class, TermSuggestionBuilder.PROTOTYPE);
         namedWriteableRegistry.registerPrototype(SuggestionBuilder.class, PhraseSuggestionBuilder.PROTOTYPE);
         namedWriteableRegistry.registerPrototype(SuggestionBuilder.class, CompletionSuggestionBuilder.PROTOTYPE);
     }
@@ -55,6 +68,7 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
     public static void afterClass() throws Exception {
         namedWriteableRegistry = null;
     }
+
 
     /**
      * Test serialization and deserialization of the suggestion builder
@@ -106,16 +120,49 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
             assertTrue("suggestion builder is not equal to self", secondBuilder.equals(secondBuilder));
             assertTrue("suggestion builder is not equal to its copy", firstBuilder.equals(secondBuilder));
             assertTrue("equals is not symmetric", secondBuilder.equals(firstBuilder));
-            assertThat("suggestion builder copy's hashcode is different from original hashcode", secondBuilder.hashCode(), equalTo(firstBuilder.hashCode()));
+            assertThat("suggestion builder copy's hashcode is different from original hashcode", secondBuilder.hashCode(),
+                    equalTo(firstBuilder.hashCode()));
 
             SB thirdBuilder = serializedCopy(secondBuilder);
             assertTrue("suggestion builder is not equal to self", thirdBuilder.equals(thirdBuilder));
             assertTrue("suggestion builder is not equal to its copy", secondBuilder.equals(thirdBuilder));
-            assertThat("suggestion builder copy's hashcode is different from original hashcode", secondBuilder.hashCode(), equalTo(thirdBuilder.hashCode()));
+            assertThat("suggestion builder copy's hashcode is different from original hashcode", secondBuilder.hashCode(),
+                    equalTo(thirdBuilder.hashCode()));
             assertTrue("equals is not transitive", firstBuilder.equals(thirdBuilder));
-            assertThat("suggestion builder copy's hashcode is different from original hashcode", firstBuilder.hashCode(), equalTo(thirdBuilder.hashCode()));
+            assertThat("suggestion builder copy's hashcode is different from original hashcode", firstBuilder.hashCode(),
+                    equalTo(thirdBuilder.hashCode()));
             assertTrue("equals is not symmetric", thirdBuilder.equals(secondBuilder));
             assertTrue("equals is not symmetric", thirdBuilder.equals(firstBuilder));
+        }
+    }
+
+    /**
+     *  creates random suggestion builder, renders it to xContent and back to new instance that should be equal to original
+     */
+    public void testFromXContent() throws IOException {
+        QueryParseContext context = new QueryParseContext(null);
+        context.parseFieldMatcher(new ParseFieldMatcher(Settings.EMPTY));
+        for (int runs = 0; runs < NUMBER_OF_TESTBUILDERS; runs++) {
+            SB suggestionBuilder = randomTestBuilder();
+            XContentBuilder xContentBuilder = XContentFactory.contentBuilder(randomFrom(XContentType.values()));
+            if (randomBoolean()) {
+                xContentBuilder.prettyPrint();
+            }
+            xContentBuilder.startObject();
+            suggestionBuilder.toXContent(xContentBuilder, ToXContent.EMPTY_PARAMS);
+            xContentBuilder.endObject();
+
+            XContentParser parser = XContentHelper.createParser(xContentBuilder.bytes());
+            context.reset(parser);
+            // we need to skip the start object and the name, those will be parsed by outer SuggestBuilder
+            parser.nextToken();
+            parser.nextToken();
+            parser.nextToken();
+
+            SuggestionBuilder<?> secondSuggestionBuilder = SuggestionBuilder.fromXContent(context, suggestionBuilder.name(), suggesters);
+            assertNotSame(suggestionBuilder, secondSuggestionBuilder);
+            assertEquals(suggestionBuilder, secondSuggestionBuilder);
+            assertEquals(suggestionBuilder.hashCode(), secondSuggestionBuilder.hashCode());
         }
     }
 

@@ -41,6 +41,7 @@ import org.elasticsearch.search.rescore.RescoreBuilder;
 import org.elasticsearch.search.suggest.SuggestionBuilder;
 import org.elasticsearch.search.suggest.completion.context.QueryContext;
 import org.elasticsearch.search.suggest.phrase.PhraseSuggestionBuilder.SmoothingModel;
+import org.elasticsearch.tasks.Task;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
@@ -71,17 +72,9 @@ import static org.elasticsearch.ElasticsearchException.readStackTrace;
 
 public abstract class StreamInput extends InputStream {
 
-    private final NamedWriteableRegistry namedWriteableRegistry;
-
     private Version version = Version.CURRENT;
 
-    protected StreamInput() {
-        this.namedWriteableRegistry = new NamedWriteableRegistry();
-    }
-
-    protected StreamInput(NamedWriteableRegistry namedWriteableRegistry) {
-        this.namedWriteableRegistry = namedWriteableRegistry;
-    }
+    protected StreamInput() { }
 
     public Version getVersion() {
         return this.version;
@@ -720,6 +713,13 @@ public abstract class StreamInput extends InputStream {
      */
     public SmoothingModel readPhraseSuggestionSmoothingModel() throws IOException {
         return readNamedWriteable(SmoothingModel.class);
+    }
+    
+    /**
+     * Reads a {@link Task.Status} from the current stream.
+     */
+    public Task.Status readTaskStatus() throws IOException {
+        return readNamedWriteable(Task.Status.class);
     }
 
     /**

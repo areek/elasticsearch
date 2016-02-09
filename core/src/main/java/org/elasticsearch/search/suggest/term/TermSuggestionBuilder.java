@@ -16,13 +16,45 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
 package org.elasticsearch.search.suggest.term;
+
+import org.apache.lucene.search.spell.DirectSpellChecker;
+import org.apache.lucene.search.spell.JaroWinklerDistance;
+import org.apache.lucene.search.spell.LevensteinDistance;
+import org.apache.lucene.search.spell.LuceneLevenshteinDistance;
+import org.apache.lucene.search.spell.NGramDistance;
+import org.apache.lucene.search.spell.StringDistance;
+import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.index.query.QueryParseContext;
 import org.elasticsearch.search.suggest.SuggestionBuilder;
 
 import java.io.IOException;
+import java.util.Locale;
+import java.util.Objects;
+
+import static org.elasticsearch.search.suggest.DirectSpellcheckerSettings.DEFAULT_ACCURACY;
+import static org.elasticsearch.search.suggest.DirectSpellcheckerSettings.DEFAULT_MAX_EDITS;
+import static org.elasticsearch.search.suggest.DirectSpellcheckerSettings.DEFAULT_MAX_INSPECTIONS;
+import static org.elasticsearch.search.suggest.DirectSpellcheckerSettings.DEFAULT_MAX_TERM_FREQ;
+import static org.elasticsearch.search.suggest.DirectSpellcheckerSettings.DEFAULT_MIN_DOC_FREQ;
+import static org.elasticsearch.search.suggest.DirectSpellcheckerSettings.DEFAULT_MIN_WORD_LENGTH;
+import static org.elasticsearch.search.suggest.DirectSpellcheckerSettings.DEFAULT_PREFIX_LENGTH;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.ACCURACY;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.MAX_EDITS;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.MAX_INSPECTIONS;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.MAX_TERM_FREQ;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.MIN_DOC_FREQ;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.MIN_WORD_LENGTH;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.PREFIX_LENGTH;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.SORT;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.STRING_DISTANCE;
+import static org.elasticsearch.search.suggest.SuggestUtils.Fields.SUGGEST_MODE;
 
 /**
  * Defines the actual suggest command. Each command uses the global options
@@ -31,18 +63,19 @@ import java.io.IOException;
  */
 public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuilder> {
 
-    static final String SUGGESTION_NAME = "term";
+    public static final TermSuggestionBuilder PROTOTYPE = new TermSuggestionBuilder("_na_"); // name doesn't matter
+    private static final String SUGGESTION_NAME = "term";
 
-    private String suggestMode;
-    private Float accuracy;
-    private String sort;
-    private String stringDistance;
-    private Integer maxEdits;
-    private Integer maxInspections;
-    private Float maxTermFreq;
-    private Integer prefixLength;
-    private Integer minWordLength;
-    private Float minDocFreq;
+    private SuggestMode suggestMode = SuggestMode.MISSING;
+    private Float accuracy = DEFAULT_ACCURACY;
+    private SortBy sort = SortBy.SCORE;
+    private StringDistanceImpl stringDistance = StringDistanceImpl.INTERNAL;
+    private Integer maxEdits = DEFAULT_MAX_EDITS;
+    private Integer maxInspections = DEFAULT_MAX_INSPECTIONS;
+    private Float maxTermFreq = DEFAULT_MAX_TERM_FREQ;
+    private Integer prefixLength = DEFAULT_PREFIX_LENGTH;
+    private Integer minWordLength = DEFAULT_MIN_WORD_LENGTH;
+    private Float minDocFreq = DEFAULT_MIN_DOC_FREQ;
 
     /**
      * @param name
@@ -65,9 +98,17 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * tokens in the suggest text.
      * </ol>
      */
-    public TermSuggestionBuilder suggestMode(String suggestMode) {
+    public TermSuggestionBuilder suggestMode(SuggestMode suggestMode) {
+        Objects.requireNonNull(suggestMode, "suggestMode must not be null");
         this.suggestMode = suggestMode;
         return this;
+    }
+
+    /**
+     * Get the suggest mode setting.
+     */
+    public SuggestMode suggestMode() {
+        return suggestMode;
     }
 
     /**
@@ -78,9 +119,19 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * <p>
      * Default is <tt>0.5</tt>
      */
-    public TermSuggestionBuilder setAccuracy(float accuracy) {
+    public TermSuggestionBuilder accuracy(float accuracy) {
+        if (accuracy < 0.0f || accuracy > 1.0f) {
+            throw new IllegalArgumentException("accuracy must be between 0 and 1");
+        }
         this.accuracy = accuracy;
         return this;
+    }
+
+    /**
+     * Get the accuracy setting.
+     */
+    public Float accuracy() {
+        return accuracy;
     }
 
     /**
@@ -90,19 +141,27 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * <li><code>score</code> - Sort should first be based on score, then
      * document frequency and then the term itself.
      * <li><code>frequency</code> - Sort should first be based on document
-     * frequency, then scotr and then the term itself.
+     * frequency, then score and then the term itself.
      * </ol>
      * <p>
      * What the score is depends on the suggester being used.
      */
-    public TermSuggestionBuilder sort(String sort) {
+    public TermSuggestionBuilder sort(SortBy sort) {
+        Objects.requireNonNull(sort, "sort must not be null");
         this.sort = sort;
         return this;
     }
 
     /**
+     * Get the sort setting.
+     */
+    public SortBy sort() {
+        return sort;
+    }
+
+    /**
      * Sets what string distance implementation to use for comparing how similar
-     * suggested terms are. Four possible values can be specified:
+     * suggested terms are. Five possible values can be specified:
      * <ol>
      * <li><code>internal</code> - This is the default and is based on
      * <code>damerau_levenshtein</code>, but highly optimized for comparing
@@ -117,9 +176,17 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * n-grams.
      * </ol>
      */
-    public TermSuggestionBuilder stringDistance(String stringDistance) {
+    public TermSuggestionBuilder stringDistance(StringDistanceImpl stringDistance) {
+        Objects.requireNonNull(stringDistance, "stringDistance must not be null");
         this.stringDistance = stringDistance;
         return this;
+    }
+
+    /**
+     * Get the string distance implementation setting.
+     */
+    public StringDistanceImpl stringDistance() {
+        return stringDistance;
     }
 
     /**
@@ -128,9 +195,19 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * other value result in an bad request error being thrown. Defaults to
      * <tt>2</tt>.
      */
-    public TermSuggestionBuilder maxEdits(Integer maxEdits) {
+    public TermSuggestionBuilder maxEdits(int maxEdits) {
+        if (maxEdits < 1 || maxEdits > 2) {
+            throw new IllegalArgumentException("maxEdits must be between 1 and 2");
+        }
         this.maxEdits = maxEdits;
         return this;
+    }
+
+    /**
+     * Get the maximum edit distance setting.
+     */
+    public Integer maxEdits() {
+        return maxEdits;
     }
 
     /**
@@ -138,9 +215,19 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * candidate suggestions. Can improve accuracy at the cost of performance.
      * Defaults to <tt>5</tt>.
      */
-    public TermSuggestionBuilder maxInspections(Integer maxInspections) {
+    public TermSuggestionBuilder maxInspections(int maxInspections) {
+        if (maxInspections < 0) {
+            throw new IllegalArgumentException("maxInspections must be positive");
+        }
         this.maxInspections = maxInspections;
         return this;
+    }
+
+    /**
+     * Get the factor for inspecting more candidate suggestions setting.
+     */
+    public Integer maxInspections() {
+        return maxInspections;
     }
 
     /**
@@ -155,8 +242,21 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * also improves the suggest performance.
      */
     public TermSuggestionBuilder maxTermFreq(float maxTermFreq) {
+        if (maxTermFreq < 0.0f) {
+            throw new IllegalArgumentException("maxTermFreq must be positive");
+        }
+        if (maxTermFreq > 1.0f && maxTermFreq != Math.floor(maxTermFreq)) {
+            throw new IllegalArgumentException("if maxTermFreq is greater than 1, it must not be a fraction");
+        }
         this.maxTermFreq = maxTermFreq;
         return this;
+    }
+
+    /**
+     * Get the maximum term frequency threshold setting.
+     */
+    public Float maxTermFreq() {
+        return maxTermFreq;
     }
 
     /**
@@ -166,8 +266,18 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * terms.
      */
     public TermSuggestionBuilder prefixLength(int prefixLength) {
+        if (prefixLength < 0) {
+            throw new IllegalArgumentException("prefixLength must be positive");
+        }
         this.prefixLength = prefixLength;
         return this;
+    }
+
+    /**
+     * Get the minimum prefix length that must match setting.
+     */
+    public Integer prefixLength() {
+        return prefixLength;
     }
 
     /**
@@ -175,8 +285,18 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * corrected. Defaults to <tt>4</tt>.
      */
     public TermSuggestionBuilder minWordLength(int minWordLength) {
+        if (minWordLength < 1) {
+            throw new IllegalArgumentException("minWordLength must be greater or equal to 1");
+        }
         this.minWordLength = minWordLength;
         return this;
+    }
+
+    /**
+     * Get the minimum length of a text term to be corrected setting.
+     */
+    public Integer minWordLength() {
+        return minWordLength;
     }
 
     /**
@@ -187,43 +307,84 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
      * value higher than 1 is specified then the number cannot be fractional.
      */
     public TermSuggestionBuilder minDocFreq(float minDocFreq) {
+        if (minDocFreq < 0.0f) {
+            throw new IllegalArgumentException("minDocFreq must be positive");
+        }
+        if (minDocFreq > 1.0f && minDocFreq != Math.floor(minDocFreq)) {
+            throw new IllegalArgumentException("if minDocFreq is greater than 1, it must not be a fraction");
+        }
         this.minDocFreq = minDocFreq;
         return this;
     }
 
+    /**
+     * Get the minimal threshold for the frequency of a term appearing in the
+     * document set setting.
+     */
+    public Float minDocFreq() {
+        return minDocFreq;
+    }
+
     @Override
     public XContentBuilder innerToXContent(XContentBuilder builder, Params params) throws IOException {
-        if (suggestMode != null) {
-            builder.field("suggest_mode", suggestMode);
-        }
-        if (accuracy != null) {
-            builder.field("accuracy", accuracy);
-        }
-        if (sort != null) {
-            builder.field("sort", sort);
-        }
-        if (stringDistance != null) {
-            builder.field("string_distance", stringDistance);
-        }
-        if (maxEdits != null) {
-            builder.field("max_edits", maxEdits);
-        }
-        if (maxInspections != null) {
-            builder.field("max_inspections", maxInspections);
-        }
-        if (maxTermFreq != null) {
-            builder.field("max_term_freq", maxTermFreq);
-        }
-        if (prefixLength != null) {
-            builder.field("prefix_length", prefixLength);
-        }
-        if (minWordLength != null) {
-            builder.field("min_word_length", minWordLength);
-        }
-        if (minDocFreq != null) {
-            builder.field("min_doc_freq", minDocFreq);
-        }
+        builder.field(SUGGEST_MODE.getPreferredName(), suggestMode);
+        builder.field(ACCURACY.getPreferredName(), accuracy);
+        builder.field(SORT.getPreferredName(), sort);
+        builder.field(STRING_DISTANCE.getPreferredName(), stringDistance);
+        builder.field(MAX_EDITS.getPreferredName(), maxEdits);
+        builder.field(MAX_INSPECTIONS.getPreferredName(), maxInspections);
+        builder.field(MAX_TERM_FREQ.getPreferredName(), maxTermFreq);
+        builder.field(PREFIX_LENGTH.getPreferredName(), prefixLength);
+        builder.field(MIN_WORD_LENGTH.getPreferredName(), minWordLength);
+        builder.field(MIN_DOC_FREQ.getPreferredName(), minDocFreq);
         return builder;
+    }
+
+    @Override
+    protected TermSuggestionBuilder innerFromXContent(QueryParseContext parseContext, String name) throws IOException {
+        XContentParser parser = parseContext.parser();
+        TermSuggestionBuilder suggestion = new TermSuggestionBuilder(name);
+        ParseFieldMatcher parseFieldMatcher = parseContext.parseFieldMatcher();
+        XContentParser.Token token;
+        String fieldName = null;
+        while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+            if (token == XContentParser.Token.FIELD_NAME) {
+                fieldName = parser.currentName();
+            } else if (token.isValue()) {
+                if (parseFieldMatcher.match(fieldName, SuggestionBuilder.ANALYZER_FIELD)) {
+                    suggestion.analyzer(parser.text());
+                } else if (parseFieldMatcher.match(fieldName, SuggestionBuilder.FIELDNAME_FIELD)) {
+                    suggestion.field(parser.text());
+                } else if (parseFieldMatcher.match(fieldName, SuggestionBuilder.SIZE_FIELD)) {
+                    suggestion.size(parser.intValue());
+                } else if (parseFieldMatcher.match(fieldName, SuggestionBuilder.SHARDSIZE_FIELD)) {
+                    suggestion.shardSize(parser.intValue());
+                } else if (parseFieldMatcher.match(fieldName, SUGGEST_MODE)) {
+                    suggestion.suggestMode(SuggestMode.resolve(parser.text()));
+                } else if (parseFieldMatcher.match(fieldName, ACCURACY)) {
+                    suggestion.accuracy(parser.floatValue());
+                } else if (parseFieldMatcher.match(fieldName, SORT)) {
+                    suggestion.sort(SortBy.resolve(parser.text()));
+                } else if (parseFieldMatcher.match(fieldName, STRING_DISTANCE)) {
+                    suggestion.stringDistance(StringDistanceImpl.resolve(parser.text()));
+                } else if (parseFieldMatcher.match(fieldName, MAX_EDITS)) {
+                    suggestion.maxEdits(parser.intValue());
+                } else if (parseFieldMatcher.match(fieldName, MAX_INSPECTIONS)) {
+                    suggestion.maxInspections(parser.intValue());
+                } else if (parseFieldMatcher.match(fieldName, MAX_TERM_FREQ)) {
+                    suggestion.maxTermFreq(parser.floatValue());
+                } else if (parseFieldMatcher.match(fieldName, PREFIX_LENGTH)) {
+                    suggestion.prefixLength(parser.intValue());
+                } else if (parseFieldMatcher.match(fieldName, MIN_WORD_LENGTH)) {
+                    suggestion.minWordLength(parser.intValue());
+                } else if (parseFieldMatcher.match(fieldName, MIN_DOC_FREQ)) {
+                    suggestion.minDocFreq(parser.floatValue());
+                }
+            } else {
+                throw new IllegalArgumentException("suggester[term] doesn't support field [" + fieldName + "]");
+            }
+        }
+        return suggestion;
     }
 
     @Override
@@ -233,25 +394,160 @@ public class TermSuggestionBuilder extends SuggestionBuilder<TermSuggestionBuild
 
     @Override
     public void doWriteTo(StreamOutput out) throws IOException {
-        // NORELEASE
-        throw new UnsupportedOperationException();
+        suggestMode.writeTo(out);
+        out.writeFloat(accuracy);
+        sort.writeTo(out);
+        stringDistance.writeTo(out);
+        out.writeVInt(maxEdits);
+        out.writeVInt(maxInspections);
+        out.writeFloat(maxTermFreq);
+        out.writeVInt(prefixLength);
+        out.writeVInt(minWordLength);
+        out.writeFloat(minDocFreq);
     }
 
     @Override
     public TermSuggestionBuilder doReadFrom(StreamInput in, String name) throws IOException {
-        // NORELEASE
-        throw new UnsupportedOperationException();
+        TermSuggestionBuilder builder = new TermSuggestionBuilder(name);
+        builder.suggestMode = SuggestMode.PROTOTYPE.readFrom(in);
+        builder.accuracy = in.readFloat();
+        builder.sort = SortBy.PROTOTYPE.readFrom(in);
+        builder.stringDistance = StringDistanceImpl.PROTOTYPE.readFrom(in);
+        builder.maxEdits = in.readVInt();
+        builder.maxInspections = in.readVInt();
+        builder.maxTermFreq = in.readFloat();
+        builder.prefixLength = in.readVInt();
+        builder.minWordLength = in.readVInt();
+        builder.minDocFreq = in.readFloat();
+        return builder;
     }
 
     @Override
     protected boolean doEquals(TermSuggestionBuilder other) {
-        // NORELEASE
-        return false;
+        return Objects.equals(suggestMode, other.suggestMode) &&
+               Objects.equals(accuracy, other.accuracy) &&
+               Objects.equals(sort, other.sort) &&
+               Objects.equals(stringDistance, other.stringDistance) &&
+               Objects.equals(maxEdits, other.maxEdits) &&
+               Objects.equals(maxInspections, other.maxInspections) &&
+               Objects.equals(maxTermFreq, other.maxTermFreq) &&
+               Objects.equals(prefixLength, other.prefixLength) &&
+               Objects.equals(minWordLength, other.minWordLength) &&
+               Objects.equals(minDocFreq, other.minDocFreq);
     }
 
     @Override
     protected int doHashCode() {
-        // NORELEASE
-        return 0;
+        return Objects.hash(suggestMode, accuracy, sort, stringDistance, maxEdits, maxInspections,
+                            maxTermFreq, prefixLength, minWordLength, minDocFreq);
     }
+
+    /** An enum representing the valid suggest modes. */
+    public enum SuggestMode implements Writeable<SuggestMode> {
+        /** Only suggest terms in the suggest text that aren't in the index. This is the default. */
+        MISSING,
+        /** Only suggest terms that occur in more docs then the original suggest text term. */
+        POPULAR,
+        /** Suggest any matching suggest terms based on tokens in the suggest text. */
+        ALWAYS;
+
+        protected static SuggestMode PROTOTYPE = MISSING;
+
+        @Override
+        public void writeTo(final StreamOutput out) throws IOException {
+            out.writeVInt(ordinal());
+        }
+
+        @Override
+        public SuggestMode readFrom(final StreamInput in) throws IOException {
+            int ordinal = in.readVInt();
+            if (ordinal < 0 || ordinal >= values().length) {
+                throw new IOException("Unknown SuggestMode ordinal [" + ordinal + "]");
+            }
+            return values()[ordinal];
+        }
+
+        public static SuggestMode resolve(final String str) {
+            Objects.requireNonNull(str, "Input string is null");
+            return valueOf(str.toUpperCase(Locale.ROOT));
+        }
+    }
+
+    /** An enum representing the valid sorting options */
+    public enum SortBy implements Writeable<SortBy> {
+        /** Sort should first be based on score, then document frequency and then the term itself. */
+        SCORE,
+        /** Sort should first be based on document frequency, then score and then the term itself. */
+        FREQUENCY;
+
+        protected static SortBy PROTOTYPE = SCORE;
+
+        @Override
+        public void writeTo(final StreamOutput out) throws IOException {
+            out.writeVInt(ordinal());
+        }
+
+        @Override
+        public SortBy readFrom(final StreamInput in) throws IOException {
+            int ordinal = in.readVInt();
+            if (ordinal < 0 || ordinal >= values().length) {
+                throw new IOException("Unknown SortBy ordinal [" + ordinal + "]");
+            }
+            return values()[ordinal];
+        }
+
+        public static SortBy resolve(final String str) {
+            Objects.requireNonNull(str, "Input string is null");
+            return valueOf(str.toUpperCase(Locale.ROOT));
+        }
+    }
+
+    /** An enum representing the valid string edit distance algorithms for determining suggestions. */
+    public enum StringDistanceImpl implements Writeable<StringDistanceImpl> {
+        /** This is the default and is based on <code>damerau_levenshtein</code>, but highly optimized
+         * for comparing string distance for terms inside the index. */
+        INTERNAL,
+        /** String distance algorithm based on Damerau-Levenshtein algorithm. */
+        DAMERAU_LEVENSHTEIN,
+        /** String distance algorithm based on Levenstein edit distance algorithm. */
+        LEVENSTEIN,
+        /** String distance algorithm based on Jaro-Winkler algorithm. */
+        JAROWINKLER,
+        /** String distance algorithm based on character n-grams. */
+        NGRAM;
+
+        protected static StringDistanceImpl PROTOTYPE = INTERNAL;
+
+        @Override
+        public void writeTo(final StreamOutput out) throws IOException {
+            out.writeVInt(ordinal());
+        }
+
+        @Override
+        public StringDistanceImpl readFrom(final StreamInput in) throws IOException {
+            int ordinal = in.readVInt();
+            if (ordinal < 0 || ordinal >= values().length) {
+                throw new IOException("Unknown StringDistanceImpl ordinal [" + ordinal + "]");
+            }
+            return values()[ordinal];
+        }
+
+        public static StringDistanceImpl resolve(final String str) {
+            Objects.requireNonNull(str, "Input string is null");
+            final String distanceVal = str.toLowerCase(Locale.US);
+            switch (distanceVal) {
+                case "internal":
+                    return INTERNAL;
+                case "damerau_levenshtein":
+                case "damerauLevenshtein":
+                    return DAMERAU_LEVENSHTEIN;
+                case "levenstein":
+                    return LEVENSTEIN;
+                case "ngram":
+                    return NGRAM;
+                default: throw new IllegalArgumentException("Illegal distance option " + str);
+            }
+        }
+    }
+
 }

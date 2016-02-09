@@ -24,6 +24,7 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.index.query.QueryParseContext;
 import org.elasticsearch.search.suggest.SuggestionBuilder;
 import org.elasticsearch.search.suggest.completion.context.CategoryQueryContext;
 import org.elasticsearch.search.suggest.completion.context.GeoQueryContext;
@@ -47,11 +48,11 @@ import java.util.Set;
  */
 public class CompletionSuggestionBuilder extends SuggestionBuilder<CompletionSuggestionBuilder> {
 
-    final static String SUGGESTION_NAME = "completion";
-    public static final CompletionSuggestionBuilder PROTOTYPE = new CompletionSuggestionBuilder("_na_");
-
+    public static final CompletionSuggestionBuilder PROTOTYPE = new CompletionSuggestionBuilder("_na_"); // name doesn't matter
+    static final String SUGGESTION_NAME = "completion";
     static final ParseField PAYLOAD_FIELD = new ParseField("payload");
     static final ParseField CONTEXTS_FIELD = new ParseField("contexts", "context");
+
     private FuzzyOptions fuzzyOptions;
     private RegexOptions regexOptions;
     private final Map<String, List<QueryContext>> queryContexts = new HashMap<>();
@@ -173,6 +174,11 @@ public class CompletionSuggestionBuilder extends SuggestionBuilder<CompletionSug
             builder.endObject();
         }
         return builder;
+    }
+
+    @Override
+    protected CompletionSuggestionBuilder innerFromXContent(QueryParseContext parseContext, String name) throws IOException {
+        return new CompletionSuggestionBuilder(name);
     }
 
     @Override

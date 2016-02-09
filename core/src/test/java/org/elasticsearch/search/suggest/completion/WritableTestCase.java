@@ -20,6 +20,8 @@
 package org.elasticsearch.search.suggest.completion;
 
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
+import org.elasticsearch.common.io.stream.NamedWriteableAwareStreamInput;
+import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.test.ESTestCase;
@@ -35,7 +37,7 @@ import static org.hamcrest.Matchers.not;
  */
 public abstract class WritableTestCase<M extends Writeable> extends ESTestCase {
 
-    private static final int NUMBER_OF_RUNS = 20;
+    protected static final int NUMBER_OF_RUNS = 20;
 
     /**
      * create random model that is put under test
@@ -83,14 +85,17 @@ public abstract class WritableTestCase<M extends Writeable> extends ESTestCase {
         assertTrue(modelName + " is not equal to self", secondModel.equals(secondModel));
         assertTrue(modelName + " is not equal to its copy", firstModel.equals(secondModel));
         assertTrue("equals is not symmetric", secondModel.equals(firstModel));
-        assertThat(modelName + " copy's hashcode is different from original hashcode", secondModel.hashCode(), equalTo(firstModel.hashCode()));
+        assertThat(modelName + " copy's hashcode is different from original hashcode", secondModel.hashCode(),
+                equalTo(firstModel.hashCode()));
 
         M thirdModel = copyModel(secondModel);
         assertTrue(modelName + " is not equal to self", thirdModel.equals(thirdModel));
         assertTrue(modelName + " is not equal to its copy", secondModel.equals(thirdModel));
-        assertThat(modelName + " copy's hashcode is different from original hashcode", secondModel.hashCode(), equalTo(thirdModel.hashCode()));
+        assertThat(modelName + " copy's hashcode is different from original hashcode", secondModel.hashCode(),
+                equalTo(thirdModel.hashCode()));
         assertTrue("equals is not transitive", firstModel.equals(thirdModel));
-        assertThat(modelName + " copy's hashcode is different from original hashcode", firstModel.hashCode(), equalTo(thirdModel.hashCode()));
+        assertThat(modelName + " copy's hashcode is different from original hashcode", firstModel.hashCode(),
+                equalTo(thirdModel.hashCode()));
         assertTrue(modelName + " equals is not symmetric", thirdModel.equals(secondModel));
         assertTrue(modelName + " equals is not symmetric", thirdModel.equals(firstModel));
     }
@@ -98,7 +103,13 @@ public abstract class WritableTestCase<M extends Writeable> extends ESTestCase {
     private M copyModel(M original) throws IOException {
         try (BytesStreamOutput output = new BytesStreamOutput()) {
             original.writeTo(output);
-            return readFrom(StreamInput.wrap(output.bytes()));
+            try (StreamInput in = new NamedWriteableAwareStreamInput(StreamInput.wrap(output.bytes()), provideNamedWritbaleRegistry())) {
+                return readFrom(in);
+            }
         }
+    }
+
+    protected NamedWriteableRegistry provideNamedWritbaleRegistry() {
+        return new NamedWriteableRegistry();
     }
 }
