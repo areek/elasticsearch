@@ -50,7 +50,8 @@ public class FuzzyOptions implements ToXContent, Writeable<FuzzyOptions> {
     private boolean unicodeAware;
     private int maxDeterminizedStates;
 
-    private FuzzyOptions(int editDistance, boolean transpositions, int fuzzyMinLength, int fuzzyPrefixLength, boolean unicodeAware, int maxDeterminizedStates) {
+    private FuzzyOptions(int editDistance, boolean transpositions, int fuzzyMinLength, int fuzzyPrefixLength,
+                         boolean unicodeAware, int maxDeterminizedStates) {
         this.editDistance = editDistance;
         this.transpositions = transpositions;
         this.fuzzyMinLength = fuzzyMinLength;
@@ -269,7 +270,8 @@ public class FuzzyOptions implements ToXContent, Writeable<FuzzyOptions> {
         }
 
         public FuzzyOptions build() {
-            return new FuzzyOptions(editDistance, transpositions, fuzzyMinLength, fuzzyPrefixLength, unicodeAware, maxDeterminizedStates);
+            return new FuzzyOptions(editDistance, transpositions, fuzzyMinLength, fuzzyPrefixLength,
+                unicodeAware, maxDeterminizedStates);
         }
     }
 }

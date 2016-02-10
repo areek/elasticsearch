@@ -41,8 +41,6 @@ import org.junit.BeforeClass;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
@@ -213,24 +211,6 @@ public abstract class AbstractSuggestionBuilderTestCase<SB extends SuggestionBui
                 return (SB) in.readSuggestion();
             }
         }
-    }
-
-    // TODO: move this to ESTestCase?
-    public static <T> void maybeSet(Consumer<T> consumer, T value) {
-        if (randomBoolean()) {
-            consumer.accept(value);
-        }
-    }
-
-    /**
-     * helper to get a random value in a certain range that's different from the input
-     */
-    protected static <T> T randomValueOtherThan(T input, Supplier<T> randomSupplier) {
-        T randomValue = null;
-        do {
-            randomValue = randomSupplier.get();
-        } while (randomValue.equals(input));
-        return randomValue;
     }
 
 }

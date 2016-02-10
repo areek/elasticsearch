@@ -24,8 +24,6 @@ import org.elasticsearch.common.unit.Fuzziness;
 
 import java.io.IOException;
 
-import static org.elasticsearch.search.suggest.AbstractSuggestionBuilderTestCase.maybeSet;
-
 public class FuzzyOptionsTests extends WritableTestCase<FuzzyOptions> {
 
     public static FuzzyOptions randomFuzzyOptions() {
@@ -59,20 +57,19 @@ public class FuzzyOptionsTests extends WritableTestCase<FuzzyOptions> {
             .setUnicodeAware(original.isUnicodeAware());
         switch (randomIntBetween(0, 5)) {
             case 0:
-                int fuzziness = randomFrom(0, 1, 2);
-                while (fuzziness == original.getEditDistance()) {
-                    fuzziness = randomFrom(0, 1, 2);
-                }
-                builder.setFuzziness(fuzziness);
+                builder.setFuzziness(randomValueOtherThan(original.getEditDistance(), () -> randomFrom(0, 1, 2)));
                 break;
             case 1:
-                builder.setFuzzyPrefixLength(original.getFuzzyPrefixLength() + randomIntBetween(1, 3));
+                builder.setFuzzyPrefixLength(randomValueOtherThan(original.getFuzzyPrefixLength(), () ->
+                    randomIntBetween(1, 3)));
                 break;
             case 2:
-                builder.setFuzzyMinLength(original.getFuzzyMinLength() + randomIntBetween(1, 3));
+                builder.setFuzzyMinLength(randomValueOtherThan(original.getFuzzyMinLength(), () ->
+                    randomIntBetween(1, 3)));
                 break;
             case 3:
-                builder.setMaxDeterminizedStates(original.getMaxDeterminizedStates() + randomIntBetween(1, 10));
+                builder.setMaxDeterminizedStates(randomValueOtherThan(original.getMaxDeterminizedStates(), () ->
+                    randomIntBetween(1, 10)));
                 break;
             case 4:
                 builder.setTranspositions(!original.isTranspositions());

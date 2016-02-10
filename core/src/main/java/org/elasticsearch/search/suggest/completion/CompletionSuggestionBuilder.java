@@ -188,29 +188,24 @@ public class CompletionSuggestionBuilder extends SuggestionBuilder<CompletionSug
 
     @Override
     public void doWriteTo(StreamOutput out) throws IOException {
-        if (payloadFields.isEmpty() == false) {
-            out.writeBoolean(true);
+        boolean payloadFieldExists = payloadFields.isEmpty() == false;
+        out.writeBoolean(payloadFieldExists);
+        if (payloadFieldExists) {
             out.writeVInt(payloadFields.size());
             for (String payloadField : payloadFields) {
                 out.writeString(payloadField);
             }
-        } else {
-            out.writeBoolean(false);
         }
+        out.writeBoolean(fuzzyOptions != null);
         if (fuzzyOptions != null) {
-            out.writeBoolean(true);
             fuzzyOptions.writeTo(out);
-        } else {
-            out.writeBoolean(false);
         }
+        out.writeBoolean(regexOptions != null);
         if (regexOptions != null) {
-            out.writeBoolean(true);
             regexOptions.writeTo(out);
-        } else {
-            out.writeBoolean(false);
         }
-        if (queryContexts.isEmpty() == false) {
-            out.writeBoolean(true);
+        boolean queryContextsExists = queryContexts.isEmpty() == false;
+        if (queryContextsExists) {
             out.writeVInt(queryContexts.size());
             for (Map.Entry<String, List<QueryContext>> namedQueryContexts : queryContexts.entrySet()) {
                 out.writeString(namedQueryContexts.getKey());
@@ -220,8 +215,6 @@ public class CompletionSuggestionBuilder extends SuggestionBuilder<CompletionSug
                     out.writeCompletionSuggestionQueryContext(queryContext);
                 }
             }
-        } else {
-            out.writeBoolean(false);
         }
     }
 

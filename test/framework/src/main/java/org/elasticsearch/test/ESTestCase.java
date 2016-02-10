@@ -75,6 +75,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static org.elasticsearch.common.util.CollectionUtils.arrayAsArrayList;
 import static org.hamcrest.Matchers.equalTo;
@@ -125,6 +127,26 @@ public abstract class ESTestCase extends LuceneTestCase {
             super.afterAlways(errors);
         }
     });
+
+    /**
+     * helper to randomly perform on <code>consumer</code> with <code>value</code>
+     */
+    public static <T> void maybeSet(Consumer<T> consumer, T value) {
+        if (randomBoolean()) {
+            consumer.accept(value);
+        }
+    }
+
+    /**
+     * helper to get a random value in a certain range that's different from the input
+     */
+    protected static <T> T randomValueOtherThan(T input, Supplier<T> randomSupplier) {
+        T randomValue = null;
+        do {
+            randomValue = randomSupplier.get();
+        } while (randomValue.equals(input));
+        return randomValue;
+    }
 
     /** called when a test fails, supplying the errors it generated */
     protected void afterIfFailed(List<Throwable> errors) {

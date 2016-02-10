@@ -103,11 +103,11 @@ public final class CategoryQueryContext implements QueryContext {
         return NAME;
     }
 
-    private static ObjectParser<Builder, Void> CATEGORY_PARSER = new ObjectParser<>("category", null);
+    private static ObjectParser<Builder, Void> CATEGORY_PARSER = new ObjectParser<>(NAME, null);
     static {
-        CATEGORY_PARSER.declareString(Builder::setCategory, new ParseField("context"));
-        CATEGORY_PARSER.declareInt(Builder::setBoost, new ParseField("boost"));
-        CATEGORY_PARSER.declareBoolean(Builder::setPrefix, new ParseField("prefix"));
+        CATEGORY_PARSER.declareString(Builder::setCategory, new ParseField(CONTEXT_VALUE));
+        CATEGORY_PARSER.declareInt(Builder::setBoost, new ParseField(CONTEXT_BOOST));
+        CATEGORY_PARSER.declareBoolean(Builder::setPrefix, new ParseField(CONTEXT_PREFIX));
     }
 
     @Override

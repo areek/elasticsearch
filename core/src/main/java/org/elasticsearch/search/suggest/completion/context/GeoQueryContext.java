@@ -119,14 +119,14 @@ public final class GeoQueryContext implements QueryContext {
         return NAME;
     }
 
-    private static ObjectParser<GeoQueryContext.Builder, Void> GEO_CONTEXT_PARSER = new ObjectParser<>("geo", null);
+    private static ObjectParser<GeoQueryContext.Builder, Void> GEO_CONTEXT_PARSER = new ObjectParser<>(NAME, null);
     static {
-        GEO_CONTEXT_PARSER.declareField((parser, geoQueryContext, geoContextMapping) -> geoQueryContext.setGeoPoint(GeoUtils.parseGeoPoint(parser)), new ParseField("context"), ObjectParser.ValueType.OBJECT);
-        GEO_CONTEXT_PARSER.declareInt(GeoQueryContext.Builder::setBoost, new ParseField("boost"));
+        GEO_CONTEXT_PARSER.declareField((parser, geoQueryContext, geoContextMapping) -> geoQueryContext.setGeoPoint(GeoUtils.parseGeoPoint(parser)), new ParseField(CONTEXT_VALUE), ObjectParser.ValueType.OBJECT);
+        GEO_CONTEXT_PARSER.declareInt(GeoQueryContext.Builder::setBoost, new ParseField(CONTEXT_BOOST));
         // TODO : add string support for precision for GeoUtils.geoHashLevelsForPrecision()
-        GEO_CONTEXT_PARSER.declareInt(GeoQueryContext.Builder::setPrecision, new ParseField("precision"));
+        GEO_CONTEXT_PARSER.declareInt(GeoQueryContext.Builder::setPrecision, new ParseField(CONTEXT_PRECISION));
         // TODO : add string array support for precision for GeoUtils.geoHashLevelsForPrecision()
-        GEO_CONTEXT_PARSER.declareIntArray(GeoQueryContext.Builder::setNeighbours, new ParseField("neighbours"));
+        GEO_CONTEXT_PARSER.declareIntArray(GeoQueryContext.Builder::setNeighbours, new ParseField(CONTEXT_NEIGHBOURS));
         GEO_CONTEXT_PARSER.declareDouble(GeoQueryContext.Builder::setLat, new ParseField("lat"));
         GEO_CONTEXT_PARSER.declareDouble(GeoQueryContext.Builder::setLon, new ParseField("lon"));
     }

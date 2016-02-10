@@ -24,8 +24,6 @@ import org.elasticsearch.index.query.RegexpFlag;
 
 import java.io.IOException;
 
-import static org.elasticsearch.search.suggest.AbstractSuggestionBuilderTestCase.maybeSet;
-
 public class RegexOptionsTests extends WritableTestCase<RegexOptions> {
 
     public static RegexOptions randomRegexOptions() {
@@ -52,7 +50,7 @@ public class RegexOptionsTests extends WritableTestCase<RegexOptions> {
     @Override
     protected RegexOptions createMutation(RegexOptions original) throws IOException {
         final RegexOptions.Builder builder = RegexOptions.builder();
-        builder.setMaxDeterminizedStates(original.getMaxDeterminizedStates() + randomIntBetween(1, 10));
+        builder.setMaxDeterminizedStates(randomValueOtherThan(original.getMaxDeterminizedStates(), () -> randomIntBetween(1, 10)));
         return builder.build();
     }
 

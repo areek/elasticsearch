@@ -20,12 +20,8 @@
 package org.elasticsearch.search.suggest.completion;
 
 import org.elasticsearch.search.suggest.completion.context.CategoryQueryContext;
-import org.elasticsearch.search.suggest.completion.context.QueryContext;
 
 import java.io.IOException;
-
-import static org.elasticsearch.search.suggest.AbstractSuggestionBuilderTestCase.maybeSet;
-import static org.hamcrest.Matchers.equalTo;
 
 public class CategoryQueryContextTests extends QueryContextTestCase<CategoryQueryContext> {
 
@@ -48,10 +44,10 @@ public class CategoryQueryContextTests extends QueryContextTestCase<CategoryQuer
         builder.setCategory(original.getCategory()).setBoost(original.getBoost()).setPrefix(original.isPrefix());
         switch (randomIntBetween(0, 2)) {
             case 0:
-                builder.setCategory(original.getCategory() + randomAsciiOfLength(10));
+                builder.setCategory(randomValueOtherThan(original.getCategory(), () -> randomAsciiOfLength(10)));
                 break;
             case 1:
-                builder.setBoost(original.getBoost() + randomIntBetween(1, 5));
+                builder.setBoost(randomValueOtherThan(original.getBoost(), () -> randomIntBetween(1, 5)));
                 break;
             case 2:
                 builder.setPrefix(!original.isPrefix());
