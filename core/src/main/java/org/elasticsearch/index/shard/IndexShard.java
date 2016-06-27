@@ -514,17 +514,16 @@ public class IndexShard extends AbstractIndexShardComponent implements IndicesCl
     private void index(Engine engine, Engine.Index index) {
         active.set(true);
         index = indexingOperationListeners.preIndex(index);
-        try {
-            if (logger.isTraceEnabled()) {
-                logger.trace("index [{}][{}]{}", index.type(), index.id(), index.docs());
-            }
-            engine.index(index);
-            index.endTime(System.nanoTime());
-        } catch (Throwable ex) {
-            indexingOperationListeners.postIndex(index, ex);
-            throw ex;
+        if (logger.isTraceEnabled()) {
+            logger.trace("index [{}][{}]{}", index.type(), index.id(), index.docs());
         }
-        indexingOperationListeners.postIndex(index, index.isCreated());
+        engine.index(index);
+        index.endTime(System.nanoTime());
+        if (index.hasFailure()) {
+            indexingOperationListeners.postIndex(index, index.getFailure());
+        } else {
+            indexingOperationListeners.postIndex(index, index.isCreated());
+        }
     }
 
     public Engine.Delete prepareDeleteOnPrimary(String type, String id, long version, VersionType versionType) {
@@ -558,18 +557,16 @@ public class IndexShard extends AbstractIndexShardComponent implements IndicesCl
     private void delete(Engine engine, Engine.Delete delete) {
         active.set(true);
         delete = indexingOperationListeners.preDelete(delete);
-        try {
-            if (logger.isTraceEnabled()) {
-                logger.trace("delete [{}]", delete.uid().text());
-            }
-            engine.delete(delete);
-            delete.endTime(System.nanoTime());
-        } catch (Throwable ex) {
-            indexingOperationListeners.postDelete(delete, ex);
-            throw ex;
+        if (logger.isTraceEnabled()) {
+            logger.trace("delete [{}]", delete.uid().text());
         }
-
-        indexingOperationListeners.postDelete(delete);
+        engine.delete(delete);
+        delete.endTime(System.nanoTime());
+        if (delete.hasFailure()) {
+            indexingOperationListeners.postDelete(delete, delete.getFailure());
+        } else {
+            indexingOperationListeners.postDelete(delete);
+        }
     }
 
     public Engine.GetResult get(Engine.Get get) {
