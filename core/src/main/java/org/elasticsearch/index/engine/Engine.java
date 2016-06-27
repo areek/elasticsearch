@@ -39,6 +39,7 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.Accountables;
+import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -277,9 +278,9 @@ public abstract class Engine implements Closeable {
         }
     }
 
-    public abstract void index(Index operation) throws EngineException;
+    public abstract void index(Index operation);
 
-    public abstract void delete(Delete delete) throws EngineException;
+    public abstract void delete(Delete delete);
 
     /**
      * Attempts to do a special commit where the given syncID is put into the commit data. The attempt
@@ -764,6 +765,7 @@ public abstract class Engine implements Closeable {
         private final VersionType versionType;
         private final Origin origin;
         private Translog.Location location;
+        private ElasticsearchException failure;
         private final long startTime;
         private long endTime;
 
@@ -808,6 +810,18 @@ public abstract class Engine implements Closeable {
 
         public Translog.Location getTranslogLocation() {
             return this.location;
+        }
+
+        public boolean hasFailure() {
+            return failure != null;
+        }
+
+        public ElasticsearchException getFailure() {
+            return failure;
+        }
+
+        public void setFailure(ElasticsearchException failure) {
+            this.failure = failure;
         }
 
         public int sizeInBytes() {

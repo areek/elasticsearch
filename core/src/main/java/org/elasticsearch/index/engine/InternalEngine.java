@@ -40,6 +40,7 @@ import org.apache.lucene.store.LockObtainFailedException;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.InfoStream;
+import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.lease.Releasable;
@@ -53,6 +54,7 @@ import org.elasticsearch.common.util.concurrent.AbstractRunnable;
 import org.elasticsearch.common.util.concurrent.KeyedLock;
 import org.elasticsearch.common.util.concurrent.ReleasableLock;
 import org.elasticsearch.index.IndexSettings;
+import org.elasticsearch.index.mapper.ParseContext;
 import org.elasticsearch.index.mapper.Uid;
 import org.elasticsearch.index.merge.MergeStats;
 import org.elasticsearch.index.merge.OnGoingMerge;
@@ -346,14 +348,14 @@ public class InternalEngine extends Engine {
             final long expectedVersion,
             final boolean deleted) {
         if (op.versionType().isVersionConflictForWrites(currentVersion, expectedVersion, deleted)) {
-            if (op.origin().isRecovery()) {
-                // version conflict, but okay
-                return true;
-            } else {
+            if (!op.origin().isRecovery()) {
                 // fatal version conflict
-                throw new VersionConflictEngineException(shardId, op.type(), op.id(),
-                        op.versionType().explainConflictForWrites(currentVersion, expectedVersion, deleted));
+                op.setFailure(new VersionConflictEngineException(shardId, op.type(), op.id(),
+                        op.versionType().explainConflictForWrites(currentVersion, expectedVersion, deleted)));
+            } else {
+                // version conflict, but okay
             }
+            return true;
         }
         return false;
     }
@@ -405,24 +407,40 @@ public class InternalEngine extends Engine {
                     innerIndex(index);
                 }
             }
-        } catch (IllegalStateException | IOException e) {
-            try {
-                maybeFailEngine("index", e);
-            } catch (Exception inner) {
-                e.addSuppressed(inner);
+        } catch (OutOfMemoryError | IllegalStateException t) {
+            index.setFailure(new IndexFailedEngineException(shardId, index.type(), index.id(), t));
+        }
+        handleOperationException("index", index);
+    }
+
+    private void handleOperationException(String source, Operation operation) {
+        if (operation.hasFailure()) {
+            ElasticsearchException failure = operation.getFailure();
+            if (failure.getCause() instanceof IOException ||
+                failure.getCause() instanceof OutOfMemoryError ||
+                failure.getCause() instanceof IllegalStateException) {
+                try {
+                    maybeFailEngine(source, (Exception) failure.getCause());
+                } catch (Exception inner) {
+                    operation.getFailure().addSuppressed(inner);
+                }
             }
-            throw new IndexFailedEngineException(shardId, index.type(), index.id(), e);
         }
     }
 
-    private void innerIndex(Index index) throws IOException {
+    private void innerIndex(Index index) {
         try (Releasable ignored = acquireLock(index.uid())) {
             lastWriteNanos = index.startTime();
             final long currentVersion;
             final boolean deleted;
             final VersionValue versionValue = versionMap.getUnderLock(index.uid());
             if (versionValue == null) {
-                currentVersion = loadCurrentVersionFromIndex(index.uid());
+                try {
+                    currentVersion = loadCurrentVersionFromIndex(index.uid());
+                } catch (IOException e) {
+                    index.setFailure(new IndexFailedEngineException(shardId, index.type(), index.id(), e));
+                    return;
+                }
                 deleted = currentVersion == Versions.NOT_FOUND;
             } else {
                 currentVersion = checkDeletedAndGCed(versionValue);
@@ -430,16 +448,17 @@ public class InternalEngine extends Engine {
             }
 
             final long expectedVersion = index.version();
-            if (checkVersionConflict(index, currentVersion, expectedVersion, deleted)) {
-                index.setCreated(false);
-                return;
-            }
+            if (checkVersionConflict(index, currentVersion, expectedVersion, deleted)) return;
 
             final long updatedVersion = updateVersion(index, currentVersion, expectedVersion);
 
             indexOrUpdate(index, currentVersion, versionValue);
 
-            maybeAddToTranslog(index, updatedVersion, Translog.Index::new, NEW_VERSION_VALUE);
+            try {
+                maybeAddToTranslog(index, updatedVersion, Translog.Index::new, NEW_VERSION_VALUE);
+            } catch (IOException e) {
+                index.setFailure(new IndexFailedEngineException(shardId, index.type(), index.id(), e));
+            }
         }
     }
 
@@ -449,52 +468,53 @@ public class InternalEngine extends Engine {
         return updatedVersion;
     }
 
-    private void indexOrUpdate(final Index index, final long currentVersion, final VersionValue versionValue) throws IOException {
+    private void indexOrUpdate(final Index index, final long currentVersion, final VersionValue versionValue) {
         if (currentVersion == Versions.NOT_FOUND) {
             // document does not exists, we can optimize for create
             index.setCreated(true);
-            index(index, indexWriter);
+            try {
+                index(index.docs(), indexWriter);
+            } catch (IOException e) {
+                index.setFailure(new IndexFailedEngineException(shardId, index.type(), index.id(), e));
+            }
         } else {
-            update(index, versionValue, indexWriter);
+            if (versionValue != null) {
+                index.setCreated(versionValue.delete()); // we have a delete which is not GC'ed...
+            }
+            try {
+                update(index.uid(), index.docs(), indexWriter);
+            } catch (IOException e) {
+                index.setFailure(new IndexFailedEngineException(shardId, index.type(), index.id(), e));
+            }
         }
     }
 
-    private static void index(final Index index, final IndexWriter indexWriter) throws IOException {
-        if (index.docs().size() > 1) {
-            indexWriter.addDocuments(index.docs());
+    private static void index(final List<ParseContext.Document> docs, final IndexWriter indexWriter) throws IOException {
+        if (docs.size() > 1) {
+            indexWriter.addDocuments(docs);
         } else {
-            indexWriter.addDocument(index.docs().get(0));
+            indexWriter.addDocument(docs.get(0));
         }
     }
 
-    private static void update(final Index index, final VersionValue versionValue, final IndexWriter indexWriter) throws IOException {
-        if (versionValue != null) {
-            index.setCreated(versionValue.delete()); // we have a delete which is not GC'ed...
+    private static void update(final Term uid, final List<ParseContext.Document> docs, final IndexWriter indexWriter) throws IOException {
+        if (docs.size() > 1) {
+            indexWriter.updateDocuments(uid, docs);
         } else {
-            index.setCreated(false);
-        }
-        if (index.docs().size() > 1) {
-            indexWriter.updateDocuments(index.uid(), index.docs());
-        } else {
-            indexWriter.updateDocument(index.uid(), index.docs().get(0));
+            indexWriter.updateDocument(uid, docs.get(0));
         }
     }
 
     @Override
-    public void delete(Delete delete) throws EngineException {
+    public void delete(Delete delete) {
         try (ReleasableLock lock = readLock.acquire()) {
             ensureOpen();
             // NOTE: we don't throttle this when merges fall behind because delete-by-id does not create new segments:
             innerDelete(delete);
-        } catch (IllegalStateException | IOException e) {
-            try {
-                maybeFailEngine("delete", e);
-            } catch (Exception inner) {
-                e.addSuppressed(inner);
-            }
-            throw new DeleteFailedEngineException(shardId, delete, e);
+        } catch (OutOfMemoryError | IllegalStateException t) {
+            delete.setFailure(new DeleteFailedEngineException(shardId, delete, t));
         }
-
+        handleOperationException("delete", delete);
         maybePruneDeletedTombstones();
     }
 
@@ -506,14 +526,19 @@ public class InternalEngine extends Engine {
         }
     }
 
-    private void innerDelete(Delete delete) throws IOException {
+    private void innerDelete(Delete delete) {
         try (Releasable ignored = acquireLock(delete.uid())) {
             lastWriteNanos = delete.startTime();
             final long currentVersion;
             final boolean deleted;
             final VersionValue versionValue = versionMap.getUnderLock(delete.uid());
             if (versionValue == null) {
-                currentVersion = loadCurrentVersionFromIndex(delete.uid());
+                try {
+                    currentVersion = loadCurrentVersionFromIndex(delete.uid());
+                } catch (IOException e) {
+                    delete.setFailure(new DeleteFailedEngineException(shardId, delete, e));
+                    return;
+                }
                 deleted = currentVersion == Versions.NOT_FOUND;
             } else {
                 currentVersion = checkDeletedAndGCed(versionValue);
@@ -529,11 +554,15 @@ public class InternalEngine extends Engine {
 
             delete.updateVersion(updatedVersion, found);
 
-            maybeAddToTranslog(delete, updatedVersion, Translog.Delete::new, DeleteVersionValue::new);
+            try {
+                maybeAddToTranslog(delete, updatedVersion, Translog.Delete::new, DeleteVersionValue::new);
+            } catch (IOException e) {
+                delete.setFailure(new DeleteFailedEngineException(shardId, delete, e));
+            }
         }
     }
 
-    private boolean deleteIfFound(Delete delete, long currentVersion, boolean deleted, VersionValue versionValue) throws IOException {
+    private boolean deleteIfFound(Delete delete, long currentVersion, boolean deleted, VersionValue versionValue) {
         final boolean found;
         if (currentVersion == Versions.NOT_FOUND) {
             // doc does not exist and no prior deletes
@@ -543,8 +572,13 @@ public class InternalEngine extends Engine {
             found = false;
         } else {
             // we deleted a currently existing document
-            indexWriter.deleteDocuments(delete.uid());
-            found = true;
+            try {
+                indexWriter.deleteDocuments(delete.uid());
+                found = true;
+            } catch (IOException e) {
+                delete.setFailure(new DeleteFailedEngineException(shardId, delete, e));
+                return false;
+            }
         }
         return found;
     }
