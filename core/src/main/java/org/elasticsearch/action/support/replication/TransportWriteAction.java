@@ -142,7 +142,11 @@ public abstract class TransportWriteAction<
          */
         protected void respondIfPossible() {
             if (finishedAsyncActions && listener != null) {
-                super.respond(listener);
+                if (replicaRequest.getPrimaryFailure() == null) {
+                    super.respond(listener);
+                } else {
+                    listener.onFailure(replicaRequest.getPrimaryFailure());
+                }
             }
         }
 
@@ -159,9 +163,11 @@ public abstract class TransportWriteAction<
      */
     class WriteReplicaResult extends ReplicaResult implements RespondingWriteResult {
         boolean finishedAsyncActions;
+        private ReplicatedWriteRequest<?> replicatedWriteRequest;
         private ActionListener<TransportResponse.Empty> listener;
 
         public WriteReplicaResult(IndexShard indexShard, ReplicatedWriteRequest<?> request, Translog.Location location) {
+            this.replicatedWriteRequest = request;
             postWriteActions(indexShard, request, location, this, logger);
         }
 
@@ -176,7 +182,11 @@ public abstract class TransportWriteAction<
          */
         protected void respondIfPossible() {
             if (finishedAsyncActions && listener != null) {
-                super.respond(listener);
+                if (replicatedWriteRequest.getPrimaryFailure() == null) {
+                    super.respond(listener);
+                } else {
+                    listener.onFailure(replicatedWriteRequest.getPrimaryFailure());
+                }
             }
         }
 

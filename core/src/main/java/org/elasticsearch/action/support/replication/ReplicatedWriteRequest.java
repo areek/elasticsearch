@@ -25,6 +25,7 @@ import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.support.WriteRequest;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.index.engine.EngineException;
 import org.elasticsearch.index.shard.ShardId;
 
 import java.io.IOException;
@@ -35,6 +36,7 @@ import java.io.IOException;
  */
 public abstract class ReplicatedWriteRequest<R extends ReplicatedWriteRequest<R>> extends ReplicationRequest<R> implements WriteRequest<R> {
     private RefreshPolicy refreshPolicy = RefreshPolicy.NONE;
+    private EngineException primaryFailure;
 
     /**
      * Constructor for deserialization.
@@ -58,15 +60,29 @@ public abstract class ReplicatedWriteRequest<R extends ReplicatedWriteRequest<R>
         return refreshPolicy;
     }
 
+    public boolean hasPrimaryFailure() {
+        return primaryFailure != null;
+    }
+
+    public EngineException getPrimaryFailure() {
+        return primaryFailure;
+    }
+
+    public void setPrimaryFailure(EngineException primaryFailure) {
+        this.primaryFailure = primaryFailure;
+    }
+
     @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         refreshPolicy = RefreshPolicy.readFrom(in);
+        primaryFailure = in.readThrowable();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         refreshPolicy.writeTo(out);
+        out.writeThrowable(primaryFailure);
     }
 }

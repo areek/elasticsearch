@@ -27,6 +27,7 @@ import org.elasticsearch.action.admin.indices.create.TransportCreateIndexAction;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.AutoCreateIndex;
 import org.elasticsearch.action.support.replication.ReplicationOperation;
+import org.elasticsearch.action.support.replication.ReplicationResponse;
 import org.elasticsearch.action.support.replication.TransportWriteAction;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.action.index.MappingUpdatedAction;
@@ -158,11 +159,16 @@ public class TransportIndexAction extends TransportWriteAction<IndexRequest, Ind
                 .routing(request.routing()).parent(request.parent()).timestamp(request.timestamp()).ttl(request.ttl());
 
         final Engine.Index operation = indexShard.prepareIndexOnReplica(sourceToParse, request.version(), request.versionType());
-        Mapping update = operation.parsedDoc().dynamicMappingsUpdate();
-        if (update != null) {
-            throw new RetryOnReplicaException(shardId, "Mappings are not available on the replica yet, triggered update: " + update);
+        if (request.getPrimaryFailure() == null) {
+            Mapping update = operation.parsedDoc().dynamicMappingsUpdate();
+            if (update != null) {
+                throw new RetryOnReplicaException(shardId, "Mappings are not available on the replica yet, triggered update: " + update);
+            }
+            indexShard.index(operation);
+            if (operation.getFailure() != null) {
+                throw operation.getFailure();
+            }
         }
-        indexShard.index(operation);
         return operation;
     }
 
@@ -188,16 +194,20 @@ public class TransportIndexAction extends TransportWriteAction<IndexRequest, Ind
             }
         }
         indexShard.index(operation);
+        if (operation.getFailure() == null) {
+            // update the version on request so it will happen on the replicas
+            final long version = operation.version();
+            request.version(version);
+            request.versionType(request.versionType().versionTypeForReplicationAndRecovery());
+            assert request.versionType().validateVersionForWrites(request.version());
+            IndexResponse response = new IndexResponse(shardId, request.type(), request.id(), request.version(), operation.isCreated());
+            return new WriteResult<>(response, operation.getTranslogLocation());
+        } else {
+            request.setPrimaryFailure(operation.getFailure());
+            IndexResponse response = new IndexResponse(shardId, request.type(), request.id(), request.version(), false);
+            return new WriteResult<>(response, null);
+        }
 
-        // update the version on request so it will happen on the replicas
-        final long version = operation.version();
-        request.version(version);
-        request.versionType(request.versionType().versionTypeForReplicationAndRecovery());
-
-        assert request.versionType().validateVersionForWrites(request.version());
-
-        IndexResponse response = new IndexResponse(shardId, request.type(), request.id(), request.version(), operation.isCreated());
-        return new WriteResult<>(response, operation.getTranslogLocation());
     }
 }
 
