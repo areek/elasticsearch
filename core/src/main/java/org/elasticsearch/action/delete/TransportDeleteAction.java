@@ -131,6 +131,9 @@ public class TransportDeleteAction extends TransportWriteAction<DeleteRequest, D
     public static WriteResult<DeleteResponse> executeDeleteRequestOnPrimary(DeleteRequest request, IndexShard indexShard) {
         Engine.Delete delete = indexShard.prepareDeleteOnPrimary(request.type(), request.id(), request.version(), request.versionType());
         indexShard.delete(delete);
+        if (delete.hasFailure()) {
+            return new WriteResult<>(delete.getFailure());
+        }
         // update the request with the version so it will go to the replicas
         request.versionType(delete.versionType().versionTypeForReplicationAndRecovery());
         request.version(delete.version());
@@ -143,6 +146,9 @@ public class TransportDeleteAction extends TransportWriteAction<DeleteRequest, D
     public static Engine.Delete executeDeleteRequestOnReplica(DeleteRequest request, IndexShard indexShard) {
         Engine.Delete delete = indexShard.prepareDeleteOnReplica(request.type(), request.id(), request.version(), request.versionType());
         indexShard.delete(delete);
+        if (delete.hasFailure()) {
+            throw delete.getFailure();
+        }
         return delete;
     }
 }

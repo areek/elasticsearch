@@ -63,7 +63,7 @@ public abstract class TransportWriteAction<
     /**
      * Called on the primary with a reference to the {@linkplain IndexShard} to modify.
      */
-    protected abstract WriteResult<Response> onPrimaryShard(Request request, IndexShard indexShard) throws Exception;
+    protected abstract WriteResult<Response> onPrimaryShard(Request request, IndexShard indexShard);
 
     /**
      * Called once per replica with a reference to the {@linkplain IndexShard} to modify.
@@ -73,10 +73,14 @@ public abstract class TransportWriteAction<
     protected abstract Translog.Location onReplicaShard(Request request, IndexShard indexShard);
 
     @Override
-    protected final WritePrimaryResult shardOperationOnPrimary(Request request) throws Exception {
+    protected final WritePrimaryResult shardOperationOnPrimary(Request request) {
         IndexShard indexShard = indexShard(request);
         WriteResult<Response> result = onPrimaryShard(request, indexShard);
-        return new WritePrimaryResult(request, result.getResponse(), result.getLocation(), indexShard);
+        if (result.operationFailed()) {
+            return new WritePrimaryResult(request, result.getFailure(), indexShard);
+        } else {
+            return new WritePrimaryResult(request, result.getResponse(), result.getLocation(), indexShard);
+        }
     }
 
     @Override
@@ -101,10 +105,18 @@ public abstract class TransportWriteAction<
     public static class WriteResult<Response extends ReplicationResponse> {
         private final Response response;
         private final Translog.Location location;
+        private final Exception failure;
 
         public WriteResult(Response response, @Nullable Location location) {
             this.response = response;
             this.location = location;
+            this.failure = null;
+        }
+
+        public WriteResult(Exception failure) {
+            this.response = null;
+            this.location = null;
+            this.failure = failure;
         }
 
         public Response getResponse() {
@@ -113,6 +125,14 @@ public abstract class TransportWriteAction<
 
         public Translog.Location getLocation() {
             return location;
+        }
+
+        public Exception getFailure() {
+            return failure;
+        }
+
+        public boolean operationFailed() {
+            return failure != null;
         }
     }
 
@@ -132,6 +152,15 @@ public abstract class TransportWriteAction<
              * refresh in parallel on the primary and on the replica.
              */
             new AsyncAfterWriteAction(indexShard, request, location, this, logger).run();
+        }
+
+        public WritePrimaryResult(Request request, Exception finalFailure, IndexShard indexShard) {
+            super(finalFailure);
+            /*
+             * We call this before replication because this might wait for a refresh and that can take a while. This way we wait for the
+             * refresh in parallel on the primary and on the replica.
+             */
+            new AsyncAfterWriteAction(indexShard, request, null, this, logger).run();
         }
 
         @Override
@@ -160,7 +189,9 @@ public abstract class TransportWriteAction<
 
         @Override
         public synchronized void onSuccess(boolean forcedRefresh) {
-            finalResponse.setForcedRefresh(forcedRefresh);
+            if (finalResponseIfSuccessful != null) {
+                finalResponseIfSuccessful.setForcedRefresh(forcedRefresh);
+            }
             finishedAsyncActions = true;
             respondIfPossible(null);
         }

@@ -37,6 +37,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.HashSet;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 import static org.mockito.Matchers.any;
@@ -62,7 +63,7 @@ public class TransportWriteActionTests extends ESTestCase {
         noRefreshCall(TestAction::shardOperationOnReplica, TestAction.WriteReplicaResult::respond);
     }
 
-    private <Result, Response> void noRefreshCall(ThrowingBiFunction<TestAction, TestRequest, Result> action,
+    private <Result, Response> void noRefreshCall(BiFunction<TestAction, TestRequest, Result> action,
                                         BiConsumer<Result, CapturingActionListener<Response>> responder)
             throws Exception {
         TestRequest request = new TestRequest();
@@ -83,7 +84,7 @@ public class TransportWriteActionTests extends ESTestCase {
         immediateRefresh(TestAction::shardOperationOnReplica, TestAction.WriteReplicaResult::respond, r -> {});
     }
 
-    private <Result, Response> void immediateRefresh(ThrowingBiFunction<TestAction, TestRequest, Result> action,
+    private <Result, Response> void immediateRefresh(BiFunction<TestAction, TestRequest, Result> action,
                                                      BiConsumer<Result, CapturingActionListener<Response>> responder,
                                                      Consumer<Response> responseChecker) throws Exception {
         TestRequest request = new TestRequest();
@@ -106,7 +107,7 @@ public class TransportWriteActionTests extends ESTestCase {
         waitForRefresh(TestAction::shardOperationOnReplica, TestAction.WriteReplicaResult::respond, (r, forcedRefresh) -> {});
     }
 
-    private <Result, Response> void waitForRefresh(ThrowingBiFunction<TestAction, TestRequest, Result> action,
+    private <Result, Response> void waitForRefresh(BiFunction<TestAction, TestRequest, Result> action,
                                                    BiConsumer<Result, CapturingActionListener<Response>> responder,
                                          BiConsumer<Response, Boolean> resultChecker) throws Exception {
         TestRequest request = new TestRequest();
@@ -140,7 +141,7 @@ public class TransportWriteActionTests extends ESTestCase {
         }
 
         @Override
-        protected WriteResult<TestResponse> onPrimaryShard(TestRequest request, IndexShard indexShard) throws Exception {
+        protected WriteResult<TestResponse> onPrimaryShard(TestRequest request, IndexShard indexShard) {
             return new WriteResult<>(new TestResponse(), location);
         }
 
@@ -182,9 +183,5 @@ public class TransportWriteActionTests extends ESTestCase {
         public void onFailure(Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private interface ThrowingBiFunction<A, B, R> {
-        R apply(A a, B b) throws Exception;
     }
 }

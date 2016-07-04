@@ -409,7 +409,6 @@ public class InternalEngine extends Engine {
         if (operation.hasFailure()) {
             ElasticsearchException failure = operation.getFailure();
             if (failure.getCause() instanceof IOException ||
-                failure.getCause() instanceof OutOfMemoryError ||
                 failure.getCause() instanceof IllegalStateException) {
                 try {
                     maybeFailEngine(source, (Exception) failure.getCause());
