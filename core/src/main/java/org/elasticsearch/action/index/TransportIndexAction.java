@@ -43,7 +43,6 @@ import org.elasticsearch.index.mapper.Mapping;
 import org.elasticsearch.index.mapper.SourceToParse;
 import org.elasticsearch.index.shard.IndexShard;
 import org.elasticsearch.index.shard.ShardId;
-import org.elasticsearch.index.translog.Translog.Location;
 import org.elasticsearch.indices.IndexAlreadyExistsException;
 import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.tasks.Task;
@@ -145,29 +144,34 @@ public class TransportIndexAction extends TransportWriteAction<IndexRequest, Ind
     }
 
     @Override
-    protected Location onReplicaShard(IndexRequest request, IndexShard indexShard) {
-        return executeIndexRequestOnReplica(request, indexShard).getTranslogLocation();
+    protected WriteResult<IndexResponse> onReplicaShard(IndexRequest request, IndexShard indexShard) {
+        return executeIndexRequestOnReplica(request, indexShard);
     }
 
     /**
      * Execute the given {@link IndexRequest} on a replica shard, throwing a
      * {@link RetryOnReplicaException} if the operation needs to be re-tried.
      */
-    public static Engine.Index executeIndexRequestOnReplica(IndexRequest request, IndexShard indexShard) {
+    public static WriteResult<IndexResponse> executeIndexRequestOnReplica(IndexRequest request, IndexShard indexShard) {
         final ShardId shardId = indexShard.shardId();
         SourceToParse sourceToParse = SourceToParse.source(SourceToParse.Origin.REPLICA, shardId.getIndexName(), request.type(), request.id(), request.source())
                 .routing(request.routing()).parent(request.parent()).timestamp(request.timestamp()).ttl(request.ttl());
 
-        final Engine.Index operation = indexShard.prepareIndexOnReplica(sourceToParse, request.version(), request.versionType());
+        final Engine.Index operation;
+        try {
+            operation = indexShard.prepareIndexOnReplica(sourceToParse, request.version(), request.versionType());
+        } catch (Exception e) {
+            return new WriteResult<>(e);
+        }
         Mapping update = operation.parsedDoc().dynamicMappingsUpdate();
         if (update != null) {
-            throw new RetryOnReplicaException(shardId, "Mappings are not available on the replica yet, triggered update: " + update);
+            return new WriteResult<>(new RetryOnReplicaException(shardId, "Mappings are not available on the replica yet, triggered update: " + update));
         }
         indexShard.index(operation);
         if (operation.hasFailure()) {
-            throw operation.getFailure();
+            return new WriteResult<>(operation.getFailure());
         }
-        return operation;
+        return new WriteResult<>(null, operation.getTranslogLocation());
     }
 
     /** Utility method to prepare an index operation on primary shards */

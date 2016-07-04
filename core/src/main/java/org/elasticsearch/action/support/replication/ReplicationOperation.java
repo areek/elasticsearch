@@ -30,6 +30,7 @@ import org.elasticsearch.cluster.routing.AllocationId;
 import org.elasticsearch.cluster.routing.IndexRoutingTable;
 import org.elasticsearch.cluster.routing.IndexShardRoutingTable;
 import org.elasticsearch.cluster.routing.ShardRouting;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.util.set.Sets;
@@ -411,7 +412,7 @@ public class ReplicationOperation<
 
     public interface PrimaryResult<R extends ReplicationRequest<R>> {
 
-        R replicaRequest();
+        @Nullable R replicaRequest();
 
         void setShardInfo(ReplicationResponse.ShardInfo shardInfo);
     }
