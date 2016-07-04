@@ -39,7 +39,6 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.index.shard.IndexShard;
 import org.elasticsearch.index.shard.ShardId;
-import org.elasticsearch.index.translog.Translog.Location;
 import org.elasticsearch.indices.IndexAlreadyExistsException;
 import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.tasks.Task;
@@ -123,8 +122,8 @@ public class TransportDeleteAction extends TransportWriteAction<DeleteRequest, D
     }
 
     @Override
-    protected Location onReplicaShard(DeleteRequest request, IndexShard indexShard) {
-        return executeDeleteRequestOnReplica(request, indexShard).getTranslogLocation();
+    protected WriteResult<DeleteResponse> onReplicaShard(DeleteRequest request, IndexShard indexShard) {
+        return executeDeleteRequestOnReplica(request, indexShard);
     }
 
     public static WriteResult<DeleteResponse> executeDeleteRequestOnPrimary(DeleteRequest request, IndexShard indexShard) {
@@ -142,12 +141,12 @@ public class TransportDeleteAction extends TransportWriteAction<DeleteRequest, D
         return new WriteResult<>(response, delete.getTranslogLocation());
     }
 
-    public static Engine.Delete executeDeleteRequestOnReplica(DeleteRequest request, IndexShard indexShard) {
+    public static WriteResult<DeleteResponse> executeDeleteRequestOnReplica(DeleteRequest request, IndexShard indexShard) {
         Engine.Delete delete = indexShard.prepareDeleteOnReplica(request.type(), request.id(), request.version(), request.versionType());
         indexShard.delete(delete);
         if (delete.hasFailure()) {
-            throw delete.getFailure();
+            return new WriteResult<>(delete.getFailure());
         }
-        return delete;
+        return new WriteResult<>(null, delete.getTranslogLocation());
     }
 }

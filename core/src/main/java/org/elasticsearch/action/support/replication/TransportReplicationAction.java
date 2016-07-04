@@ -397,13 +397,19 @@ public abstract class TransportReplicationAction<
     }
 
     protected class ReplicaResult {
+        protected Exception failure;
+
         /**
          * Public constructor so subclasses can call it.
          */
         public ReplicaResult() {}
 
         public void respond(ActionListener<TransportResponse.Empty> listener) {
-            listener.onResponse(TransportResponse.Empty.INSTANCE);
+            if (failure == null) {
+                listener.onResponse(TransportResponse.Empty.INSTANCE);
+            } else {
+                listener.onFailure(failure);
+            }
         }
     }
 

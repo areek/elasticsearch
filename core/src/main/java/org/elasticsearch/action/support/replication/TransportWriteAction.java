@@ -67,7 +67,7 @@ public abstract class TransportWriteAction<
      *
      * @return the translog location of the {@linkplain IndexShard} after the write was completed or null if no write occurred
      */
-    protected abstract Translog.Location onReplicaShard(Request request, IndexShard indexShard);
+    protected abstract WriteResult<Response> onReplicaShard(Request request, IndexShard indexShard);
 
     @Override
     protected final WritePrimaryResult shardOperationOnPrimary(Request request) {
@@ -75,16 +75,18 @@ public abstract class TransportWriteAction<
         WriteResult<Response> result = onPrimaryShard(request, indexShard);
         if (result.operationFailed()) {
             return new WritePrimaryResult(request, result.getFailure(), indexShard);
-        } else {
-            return new WritePrimaryResult(request, result.getResponse(), result.getLocation(), indexShard);
         }
+        return new WritePrimaryResult(request, result.getResponse(), result.getLocation(), indexShard);
     }
 
     @Override
     protected final WriteReplicaResult shardOperationOnReplica(Request request) {
         IndexShard indexShard = indexShard(request);
-        Translog.Location location = onReplicaShard(request, indexShard);
-        return new WriteReplicaResult(indexShard, request, location);
+        WriteResult<Response> result = onReplicaShard(request, indexShard);
+        if (result.operationFailed()) {
+            return new WriteReplicaResult(request, result.getFailure(), indexShard);
+        }
+        return new WriteReplicaResult(request, result.getLocation(), indexShard);
     }
 
     /**
@@ -192,8 +194,13 @@ public abstract class TransportWriteAction<
         boolean finishedAsyncActions;
         private ActionListener<TransportResponse.Empty> listener;
 
-        public WriteReplicaResult(IndexShard indexShard, ReplicatedWriteRequest<?> request, Translog.Location location) {
+        public WriteReplicaResult(ReplicatedWriteRequest<?> request, Location location, IndexShard indexShard) {
             postWriteActions(indexShard, request, location, this, logger);
+        }
+
+        public WriteReplicaResult(ReplicatedWriteRequest<?> request, Exception failure, IndexShard indexShard) {
+            this.failure = failure;
+            postWriteActions(indexShard, request, null, this, logger);
         }
 
         @Override
