@@ -108,13 +108,14 @@ public class ReplicationOperation<
         pendingShards.incrementAndGet();
         primaryResult = primary.perform(request);
         final ReplicaRequest replicaRequest = primaryResult.replicaRequest();
-        assert replicaRequest.primaryTerm() > 0 : "replicaRequest doesn't have a primary term";
-        if (logger.isTraceEnabled()) {
-            logger.trace("[{}] op [{}] completed on primary for request [{}]", primaryId, opType, request);
+        if (replicaRequest != null) {
+            assert replicaRequest.primaryTerm() > 0 : "replicaRequest doesn't have a primary term";
+            if (logger.isTraceEnabled()) {
+                logger.trace("[{}] op [{}] completed on primary for request [{}]", primaryId, opType, request);
+            }
+
+            performOnReplicas(primaryId, replicaRequest);
         }
-
-        performOnReplicas(primaryId, replicaRequest);
-
         successfulShards.incrementAndGet();
         decPendingAndFinishIfNeeded();
     }

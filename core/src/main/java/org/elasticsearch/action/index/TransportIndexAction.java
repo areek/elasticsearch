@@ -140,7 +140,7 @@ public class TransportIndexAction extends TransportWriteAction<IndexRequest, Ind
     }
 
     @Override
-    protected WriteResult<IndexResponse> onPrimaryShard(IndexRequest request, IndexShard indexShard) throws Exception {
+    protected WriteResult<IndexResponse> onPrimaryShard(IndexRequest request, IndexShard indexShard) {
         return executeIndexRequestOnPrimary(request, indexShard, mappingUpdatedAction);
     }
 
@@ -164,6 +164,9 @@ public class TransportIndexAction extends TransportWriteAction<IndexRequest, Ind
             throw new RetryOnReplicaException(shardId, "Mappings are not available on the replica yet, triggered update: " + update);
         }
         indexShard.index(operation);
+        if (operation.hasFailure()) {
+            throw operation.getFailure();
+        }
         return operation;
     }
 
@@ -175,21 +178,32 @@ public class TransportIndexAction extends TransportWriteAction<IndexRequest, Ind
     }
 
     public static WriteResult<IndexResponse> executeIndexRequestOnPrimary(IndexRequest request, IndexShard indexShard,
-            MappingUpdatedAction mappingUpdatedAction) throws Exception {
-        Engine.Index operation = prepareIndexOperationOnPrimary(request, indexShard);
+            MappingUpdatedAction mappingUpdatedAction) {
+        Engine.Index operation;
+        try {
+            operation = prepareIndexOperationOnPrimary(request, indexShard);
+        } catch (Exception e) {
+            return new WriteResult<>(e);
+        }
         Mapping update = operation.parsedDoc().dynamicMappingsUpdate();
         final ShardId shardId = indexShard.shardId();
         if (update != null) {
-            mappingUpdatedAction.updateMappingOnMaster(shardId.getIndex(), request.type(), update);
-            operation = prepareIndexOperationOnPrimary(request, indexShard);
+            try {
+                mappingUpdatedAction.updateMappingOnMaster(shardId.getIndex(), request.type(), update);
+                operation = prepareIndexOperationOnPrimary(request, indexShard);
+            } catch (Exception e) {
+                return new WriteResult<>(e);
+            }
             update = operation.parsedDoc().dynamicMappingsUpdate();
             if (update != null) {
-                throw new ReplicationOperation.RetryOnPrimaryException(shardId,
-                    "Dynamic mappings are not available on the node that holds the primary yet");
+                return new WriteResult<>(new ReplicationOperation.RetryOnPrimaryException(shardId,
+                    "Dynamic mappings are not available on the node that holds the primary yet"));
             }
         }
         indexShard.index(operation);
-
+        if (operation.hasFailure()) {
+            return new WriteResult<>(operation.getFailure());
+        }
         // update the version on request so it will happen on the replicas
         final long version = operation.version();
         request.version(version);

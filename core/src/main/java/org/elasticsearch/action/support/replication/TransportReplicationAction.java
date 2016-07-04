@@ -156,7 +156,7 @@ public abstract class TransportReplicationAction<
      *
      * @param shardRequest the request to the primary shard
      */
-    protected abstract PrimaryResult shardOperationOnPrimary(Request shardRequest) throws Exception;
+    protected abstract PrimaryResult shardOperationOnPrimary(Request shardRequest);
 
     /**
      * Synchronous replica operation on nodes with replica copies. This is done under the lock form
@@ -360,11 +360,19 @@ public abstract class TransportReplicationAction<
 
     protected class PrimaryResult implements ReplicationOperation.PrimaryResult<ReplicaRequest> {
         final ReplicaRequest replicaRequest;
-        final Response finalResponse;
+        final Response finalResponseIfSuccessful;
+        final Exception finalFailure;
 
-        public PrimaryResult(ReplicaRequest replicaRequest, Response finalResponse) {
+        public PrimaryResult(ReplicaRequest replicaRequest, Response finalResponseIfSuccessful) {
             this.replicaRequest = replicaRequest;
-            this.finalResponse = finalResponse;
+            this.finalResponseIfSuccessful = finalResponseIfSuccessful;
+            this.finalFailure = null;
+        }
+
+        public PrimaryResult(Exception finalFailure) {
+            this.replicaRequest = null;
+            this.finalResponseIfSuccessful = null;
+            this.finalFailure = finalFailure;
         }
 
         @Override
@@ -374,11 +382,17 @@ public abstract class TransportReplicationAction<
 
         @Override
         public void setShardInfo(ReplicationResponse.ShardInfo shardInfo) {
-            finalResponse.setShardInfo(shardInfo);
+            if (finalResponseIfSuccessful != null) {
+                finalResponseIfSuccessful.setShardInfo(shardInfo);
+            }
         }
 
         public void respond(ActionListener<Response> listener) {
-            listener.onResponse(finalResponse);
+            if (finalResponseIfSuccessful != null) {
+                listener.onResponse(finalResponseIfSuccessful);
+            } else {
+                listener.onFailure(finalFailure);
+            }
         }
     }
 
@@ -848,7 +862,9 @@ public abstract class TransportReplicationAction<
         @Override
         public PrimaryResult perform(Request request) throws Exception {
             PrimaryResult result = shardOperationOnPrimary(request);
-            result.replicaRequest().primaryTerm(indexShard.getPrimaryTerm());
+            if (result.replicaRequest() != null) {
+                result.replicaRequest().primaryTerm(indexShard.getPrimaryTerm());
+            }
             return result;
         }
 
