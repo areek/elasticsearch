@@ -158,7 +158,7 @@ public abstract class TransportReplicationAction<
      *
      * @param shardRequest the request to the primary shard
      */
-    protected abstract PrimaryResult shardOperationOnPrimary(Request shardRequest);
+    protected abstract PrimaryResult shardOperationOnPrimary(Request shardRequest) throws Exception;
 
     /**
      * Synchronous replica operation on nodes with replica copies. This is done under the lock form

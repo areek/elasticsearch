@@ -113,6 +113,7 @@ public class ReplicationOperation<
         primaryResult = primary.perform(request);
         final ReplicaRequest replicaRequest = primaryResult.replicaRequest();
         if (replicaRequest != null) {
+            // when the replication request is not null, it means the primary operation has been successful, so replicate
             assert replicaRequest.primaryTerm() > 0 : "replicaRequest doesn't have a primary term";
             if (logger.isTraceEnabled()) {
                 logger.trace("[{}] op [{}] completed on primary for request [{}]", primaryId, opType, request);
@@ -412,6 +413,10 @@ public class ReplicationOperation<
 
     public interface PrimaryResult<R extends ReplicationRequest<R>> {
 
+        /**
+         * Returns the replication request when the primary operation
+         * is successful otherwise returns <code>null</code>
+         */
         @Nullable R replicaRequest();
 
         void setShardInfo(ReplicationResponse.ShardInfo shardInfo);

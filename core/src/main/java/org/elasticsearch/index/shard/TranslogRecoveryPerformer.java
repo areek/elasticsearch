@@ -159,9 +159,6 @@ public class TranslogRecoveryPerformer {
                         logger.trace("[translog] recover [index] op of [{}][{}]", index.type(), index.id());
                     }
                     index(engine, engineIndex);
-                    if (engineIndex.getFailure() != null) {
-                        throw engineIndex.getFailure();
-                    }
                     break;
                 case DELETE:
                     Translog.Delete delete = (Translog.Delete) operation;
@@ -172,9 +169,6 @@ public class TranslogRecoveryPerformer {
                     final Engine.Delete engineDelete = new Engine.Delete(uid.type(), uid.id(), delete.uid(), delete.version(),
                         delete.versionType().versionTypeForReplicationAndRecovery(), origin, System.nanoTime(), false);
                     delete(engine, engineDelete);
-                    if (engineDelete.getFailure() != null) {
-                        throw engineDelete.getFailure();
-                    }
                     break;
                 default:
                     throw new IllegalStateException("No operation defined for [" + operation + "]");

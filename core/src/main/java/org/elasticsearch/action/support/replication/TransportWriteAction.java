@@ -63,7 +63,7 @@ public abstract class TransportWriteAction<
     /**
      * Called on the primary with a reference to the {@linkplain IndexShard} to modify.
      */
-    protected abstract WriteResult<Response> onPrimaryShard(Request request, IndexShard indexShard);
+    protected abstract WriteResult<Response> onPrimaryShard(Request request, IndexShard indexShard) throws Exception;
 
     /**
      * Called once per replica with a reference to the {@linkplain IndexShard} to modify.
@@ -73,23 +73,23 @@ public abstract class TransportWriteAction<
     protected abstract WriteResult<Response> onReplicaShard(Request request, IndexShard indexShard);
 
     @Override
-    protected final WritePrimaryResult shardOperationOnPrimary(Request request) {
+    protected final WritePrimaryResult shardOperationOnPrimary(Request request) throws Exception {
         IndexShard indexShard = indexShard(request);
         WriteResult<Response> result = onPrimaryShard(request, indexShard);
-        if (result.operationFailed()) {
-            return new WritePrimaryResult(request, result.getFailure(), indexShard);
+        if (result.success()) {
+            return new WritePrimaryResult(request, result.getResponse(), result.getLocation(), indexShard);
         }
-        return new WritePrimaryResult(request, result.getResponse(), result.getLocation(), indexShard);
+        return new WritePrimaryResult(request, result.getFailure(), indexShard);
     }
 
     @Override
     protected final WriteReplicaResult shardOperationOnReplica(Request request) {
         IndexShard indexShard = indexShard(request);
         WriteResult<Response> result = onReplicaShard(request, indexShard);
-        if (result.operationFailed()) {
-            return new WriteReplicaResult(request, result.getFailure(), indexShard);
+        if (result.success()) {
+            return new WriteReplicaResult(request, result.getLocation(), indexShard);
         }
-        return new WriteReplicaResult(request, result.getLocation(), indexShard);
+        return new WriteReplicaResult(request, result.getFailure(), indexShard);
     }
 
     /**
@@ -133,8 +133,8 @@ public abstract class TransportWriteAction<
             return failure;
         }
 
-        public boolean operationFailed() {
-            return failure != null;
+        public boolean success() {
+            return failure == null;
         }
     }
 

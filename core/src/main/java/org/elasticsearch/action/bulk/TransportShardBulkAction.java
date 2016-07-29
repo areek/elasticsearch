@@ -19,7 +19,6 @@
 
 package org.elasticsearch.action.bulk;
 
-import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.delete.DeleteRequest;
@@ -106,7 +105,7 @@ public class TransportShardBulkAction extends TransportWriteAction<BulkShardRequ
     }
 
     @Override
-    protected WriteResult<BulkShardResponse> onPrimaryShard(BulkShardRequest request, IndexShard indexShard) {
+    protected WriteResult<BulkShardResponse> onPrimaryShard(BulkShardRequest request, IndexShard indexShard) throws Exception {
         ShardId shardId = request.shardId();
         final IndexService indexService = indicesService.indexServiceSafe(shardId.getIndex());
         final IndexMetaData metaData = indexService.getIndexSettings().getIndexMetaData();
@@ -128,7 +127,7 @@ public class TransportShardBulkAction extends TransportWriteAction<BulkShardRequ
         return new WriteResult<>(response, location);
     }
 
-    private Translog.Location handleItem(IndexMetaData metaData, BulkShardRequest request, IndexShard indexShard, long[] preVersions, VersionType[] preVersionTypes, Translog.Location location, int requestIndex, BulkItemRequest item) {
+    private Translog.Location handleItem(IndexMetaData metaData, BulkShardRequest request, IndexShard indexShard, long[] preVersions, VersionType[] preVersionTypes, Translog.Location location, int requestIndex, BulkItemRequest item) throws Exception {
         if (item.request() instanceof IndexRequest) {
             location = index(metaData, request, indexShard, preVersions, preVersionTypes, location, requestIndex, item);
         } else if (item.request() instanceof DeleteRequest) {
@@ -146,35 +145,42 @@ public class TransportShardBulkAction extends TransportWriteAction<BulkShardRequ
         return location;
     }
 
-    private Translog.Location index(IndexMetaData metaData, BulkShardRequest request, IndexShard indexShard, long[] preVersions, VersionType[] preVersionTypes, Translog.Location location, int requestIndex, BulkItemRequest item) {
+    private Translog.Location index(IndexMetaData metaData, BulkShardRequest request, IndexShard indexShard, long[] preVersions, VersionType[] preVersionTypes, Translog.Location location, int requestIndex, BulkItemRequest item) throws Exception {
         IndexRequest indexRequest = (IndexRequest) item.request();
         preVersions[requestIndex] = indexRequest.version();
         preVersionTypes[requestIndex] = indexRequest.versionType();
-        WriteResult<IndexResponse> result = shardIndexOperation(request, indexRequest, metaData, indexShard, true);
-        if (result.operationFailed()) {
-            Exception failure = result.getFailure();
-            if (retryPrimaryException(failure)) {
+        try {
+            WriteResult<IndexResponse> result = shardIndexOperation(request, indexRequest, metaData, indexShard, true);
+            if (result.success()) {
+                location = locationToSync(location, result.getLocation());
+                // add the response
+                IndexResponse indexResponse = result.getResponse();
+                setResponse(item, new BulkItemResponse(item.id(), indexRequest.opType().lowercase(), indexResponse));
+            } else {
+                logFailure(result.getFailure(), "index", request.shardId(), indexRequest);
+                // if its a conflict failure, and we already executed the request on a primary (and we execute it
+                // again, due to primary relocation and only processing up to N bulk items when the shard gets closed)
+                // then just use the response we got from the successful execution
+                if (item.getPrimaryResponse() != null && isConflictException(result.getFailure())) {
+                    setResponse(item, item.getPrimaryResponse());
+                } else {
+                    setResponse(item, new BulkItemResponse(item.id(), indexRequest.opType().lowercase(),
+                        new BulkItemResponse.Failure(request.index(), indexRequest.type(), indexRequest.id(), result.getFailure())));
+                }
+            }
+        } catch (Exception e) {
+            // rethrow the failure if we are going to retry on primary and let parent failure to handle it
+            if (retryPrimaryException(e)) {
                 // restore updated versions...
                 for (int j = 0; j < requestIndex; j++) {
                     applyVersion(request.items()[j], preVersions[j], preVersionTypes[j]);
                 }
+                throw e;
             }
-            logFailure(failure, "index", request.shardId(), indexRequest);
-            // if its a conflict failure, and we already executed the request on a primary (and we execute it
-            // again, due to primary relocation and only processing up to N bulk items when the shard gets closed)
-            // then just use the response we got from the successful execution
-            if (item.getPrimaryResponse() != null && isConflictException(failure)) {
-                setResponse(item, item.getPrimaryResponse());
-            } else {
-                setResponse(item, new BulkItemResponse(item.id(), indexRequest.opType().lowercase(),
-                    new BulkItemResponse.Failure(request.index(), indexRequest.type(), indexRequest.id(), failure)));
-            }
-            return null;
+            logFailure(e, "index", request.shardId(), indexRequest);
+            setResponse(item, new BulkItemResponse(item.id(), indexRequest.opType().lowercase(),
+                new BulkItemResponse.Failure(request.index(), indexRequest.type(), indexRequest.id(), e)));
         }
-        location = locationToSync(location, result.getLocation());
-        // add the response
-        IndexResponse indexResponse = result.getResponse();
-        setResponse(item, new BulkItemResponse(item.id(), indexRequest.opType().lowercase(), indexResponse));
         return location;
     }
 
@@ -191,41 +197,52 @@ public class TransportShardBulkAction extends TransportWriteAction<BulkShardRequ
         preVersions[requestIndex] = deleteRequest.version();
         preVersionTypes[requestIndex] = deleteRequest.versionType();
 
-        // add the response
-        final WriteResult<DeleteResponse> writeResult = TransportDeleteAction.executeDeleteRequestOnPrimary(deleteRequest, indexShard);
-        if (writeResult.operationFailed()) {
-            Exception failure = writeResult.getFailure();
-            if (retryPrimaryException(failure)) {
+        try {
+            // add the response
+            WriteResult<DeleteResponse> writeResult = TransportDeleteAction.executeDeleteRequestOnPrimary(deleteRequest, indexShard);
+            if (writeResult.success()) {
+                DeleteResponse deleteResponse = writeResult.getResponse();
+                location = locationToSync(location, writeResult.getLocation());
+                setResponse(item, new BulkItemResponse(item.id(), OP_TYPE_DELETE, deleteResponse));
+            } else {
+                logFailure(writeResult.getFailure(), "delete", request.shardId(), deleteRequest);
+                // if its a conflict failure, and we already executed the request on a primary (and we execute it
+                // again, due to primary relocation and only processing up to N bulk items when the shard gets closed)
+                // then just use the response we got from the successful execution
+                if (item.getPrimaryResponse() != null && isConflictException(writeResult.getFailure())) {
+                    setResponse(item, item.getPrimaryResponse());
+                } else {
+                    setResponse(item, new BulkItemResponse(item.id(), OP_TYPE_DELETE,
+                        new BulkItemResponse.Failure(request.index(), deleteRequest.type(), deleteRequest.id(), writeResult.getFailure())));
+                }
+            }
+        } catch (Exception e) {
+            if (retryPrimaryException(e)) {
                 // restore updated versions...
                 for (int j = 0; j < requestIndex; j++) {
                     applyVersion(request.items()[j], preVersions[j], preVersionTypes[j]);
                 }
+                throw e;
             }
-            logFailure(failure, "delete", request.shardId(), deleteRequest);
-            // if its a conflict failure, and we already executed the request on a primary (and we execute it
-            // again, due to primary relocation and only processing up to N bulk items when the shard gets closed)
-            // then just use the response we got from the successful execution
-            if (item.getPrimaryResponse() != null && isConflictException(failure)) {
-                setResponse(item, item.getPrimaryResponse());
-            } else {
-                setResponse(item, new BulkItemResponse(item.id(), OP_TYPE_DELETE,
-                    new BulkItemResponse.Failure(request.index(), deleteRequest.type(), deleteRequest.id(), failure)));
-            }
-            return null;
+            logFailure(e, "delete", request.shardId(), deleteRequest);
+            setResponse(item, new BulkItemResponse(item.id(), OP_TYPE_DELETE,
+                new BulkItemResponse.Failure(request.index(), deleteRequest.type(), deleteRequest.id(), e)));
         }
-        DeleteResponse deleteResponse = writeResult.getResponse();
-        location = locationToSync(location, writeResult.getLocation());
-        setResponse(item, new BulkItemResponse(item.id(), OP_TYPE_DELETE, deleteResponse));
         return location;
     }
 
-    private Tuple<Translog.Location, BulkItemRequest> update(IndexMetaData metaData, BulkShardRequest request, IndexShard indexShard, long[] preVersions, VersionType[] preVersionTypes, Translog.Location location, int requestIndex, BulkItemRequest item) {
+    private Tuple<Translog.Location, BulkItemRequest> update(IndexMetaData metaData, BulkShardRequest request, IndexShard indexShard, long[] preVersions, VersionType[] preVersionTypes, Translog.Location location, int requestIndex, BulkItemRequest item) throws Exception {
         UpdateRequest updateRequest = (UpdateRequest) item.request();
         preVersions[requestIndex] = updateRequest.version();
         preVersionTypes[requestIndex] = updateRequest.versionType();
         //  We need to do the requested retries plus the initial attempt. We don't do < 1+retry_on_conflict because retry_on_conflict may be Integer.MAX_VALUE
         for (int updateAttemptsCount = 0; updateAttemptsCount <= updateRequest.retryOnConflict(); updateAttemptsCount++) {
-            UpdateResult updateResult = shardUpdateOperation(metaData, request, updateRequest, indexShard);
+            UpdateResult updateResult;
+            try {
+                updateResult = shardUpdateOperation(metaData, request, updateRequest, indexShard);
+            } catch (Exception t) {
+                updateResult = new UpdateResult(null, null, false, t, null);
+            }
             if (updateResult.success()) {
                 if (updateResult.writeResult != null) {
                     location = locationToSync(location, updateResult.writeResult.getLocation());
@@ -328,7 +345,7 @@ public class TransportShardBulkAction extends TransportWriteAction<BulkShardRequ
     }
 
     private WriteResult<IndexResponse> shardIndexOperation(BulkShardRequest request, IndexRequest indexRequest, IndexMetaData metaData,
-            IndexShard indexShard, boolean processed) {
+            IndexShard indexShard, boolean processed) throws Exception {
 
         MappingMetaData mappingMd = metaData.mappingOrDefault(indexRequest.type());
         if (!processed) {
@@ -391,39 +408,33 @@ public class TransportShardBulkAction extends TransportWriteAction<BulkShardRequ
     }
 
     private UpdateResult shardUpdateOperation(IndexMetaData metaData, BulkShardRequest bulkShardRequest, UpdateRequest updateRequest, IndexShard indexShard) {
-        final UpdateHelper.Result translate;
-        try {
-            translate = updateHelper.prepare(updateRequest, indexShard);
-        } catch (Exception e) {
-            // document missing exception
-            return new UpdateResult(null, null, false, e, null);
-        }
+        UpdateHelper.Result translate = updateHelper.prepare(updateRequest, indexShard);
         switch (translate.getResponseResult()) {
             case CREATED:
             case UPDATED:
                 IndexRequest indexRequest = translate.action();
-                WriteResult result = shardIndexOperation(bulkShardRequest, indexRequest, metaData, indexShard, false);
-                if (result.operationFailed()) {
-                    final Throwable cause = ExceptionsHelper.unwrapCause(result.getFailure());
-                    boolean retry = false;
-                    if (cause instanceof VersionConflictEngineException) {
-                        retry = true;
+                try {
+                    WriteResult result = shardIndexOperation(bulkShardRequest, indexRequest, metaData, indexShard, false);
+                    if (result.success()) {
+                        return new UpdateResult(translate, indexRequest, result);
+                    } else {
+                        return new UpdateResult(translate, indexRequest, isConflictException(result.getFailure()), ExceptionsHelper.unwrapCause(result.getFailure()), null);
                     }
-                    return new UpdateResult(translate, indexRequest, retry, cause, null);
+                } catch (Exception e) {
+                    return new UpdateResult(translate, indexRequest, false, ExceptionsHelper.unwrapCause(e), null);
                 }
-                return new UpdateResult(translate, indexRequest, result);
             case DELETED:
                 DeleteRequest deleteRequest = translate.action();
-                WriteResult<DeleteResponse> deleteResult = TransportDeleteAction.executeDeleteRequestOnPrimary(deleteRequest, indexShard);
-                if (deleteResult.operationFailed()) {
-                    final Throwable cause = ExceptionsHelper.unwrapCause(deleteResult.getFailure());
-                    boolean retry = false;
-                    if (cause instanceof VersionConflictEngineException) {
-                        retry = true;
+                try {
+                    WriteResult<DeleteResponse> deleteResult = TransportDeleteAction.executeDeleteRequestOnPrimary(deleteRequest, indexShard);
+                    if (deleteResult.success()) {
+                        return new UpdateResult(translate, deleteRequest, deleteResult);
+                    } else {
+                        return new UpdateResult(translate, deleteRequest, isConflictException(deleteResult.getFailure()), ExceptionsHelper.unwrapCause(deleteResult.getFailure()), null);
                     }
-                    return new UpdateResult(translate, deleteRequest, retry, cause, null);
+                } catch (Exception e) {
+                    return new UpdateResult(translate, deleteRequest, false, ExceptionsHelper.unwrapCause(e), null);
                 }
-                return new UpdateResult(translate, deleteRequest, deleteResult);
             case NOOP:
                 UpdateResponse updateResponse = translate.action();
                 indexShard.noopUpdate(updateRequest.type());
@@ -443,27 +454,31 @@ public class TransportShardBulkAction extends TransportWriteAction<BulkShardRequ
             }
             if (item.request() instanceof IndexRequest) {
                 IndexRequest indexRequest = (IndexRequest) item.request();
-                WriteResult<IndexResponse> result = TransportIndexAction.executeIndexRequestOnReplica(indexRequest, indexShard);
-                if (result.operationFailed()) {
+                try {
+                    WriteResult<IndexResponse> result = TransportIndexAction.executeIndexRequestOnReplica(indexRequest, indexShard);
+                    if (result.success()) {
+                        location = locationToSync(location, result.getLocation());
+                    }
+                } catch (Exception e) {
                     // if its not an ignore replica failure, we need to make sure to bubble up the failure
                     // so we will fail the shard
-                    if (!ignoreReplicaException(result.getFailure())) {
-                        return new WriteResult<>(result.getFailure());
+                    if (!ignoreReplicaException(e)) {
+                        throw e;
                     }
-                } else {
-                    location = locationToSync(location, result.getLocation());
                 }
             } else if (item.request() instanceof DeleteRequest) {
                 DeleteRequest deleteRequest = (DeleteRequest) item.request();
-                WriteResult<DeleteResponse> result = TransportDeleteAction.executeDeleteRequestOnReplica(deleteRequest, indexShard);
-                if (result.operationFailed()) {
+                try {
+                    WriteResult<DeleteResponse> result = TransportDeleteAction.executeDeleteRequestOnReplica(deleteRequest, indexShard);
+                    if (result.success()) {
+                        location = locationToSync(location, result.getLocation());
+                    }
+                } catch (Exception e) {
                     // if its not an ignore replica failure, we need to make sure to bubble up the failure
                     // so we will fail the shard
-                    if (!ignoreReplicaException(result.getFailure())) {
-                        return new WriteResult<>(result.getFailure());
+                    if (!ignoreReplicaException(e)) {
+                        throw e;
                     }
-                } else {
-                    location = locationToSync(location, result.getLocation());
                 }
             } else {
                 throw new IllegalStateException("Unexpected index operation: " + item.request());

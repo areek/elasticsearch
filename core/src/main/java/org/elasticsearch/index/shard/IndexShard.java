@@ -535,12 +535,17 @@ public class IndexShard extends AbstractIndexShardComponent implements IndicesCl
         if (logger.isTraceEnabled()) {
             logger.trace("index [{}][{}]{}", index.type(), index.id(), index.docs());
         }
-        engine.index(index);
-        index.endTime(System.nanoTime());
-        if (index.hasFailure()) {
-            indexingOperationListeners.postIndex(index, index.getFailure());
-        } else {
-            indexingOperationListeners.postIndex(index, index.isCreated());
+        try {
+            engine.index(index);
+            index.endTime(System.nanoTime());
+            if (index.hasFailure()) {
+                indexingOperationListeners.postIndex(index, index.getFailure());
+            } else {
+                indexingOperationListeners.postIndex(index, index.isCreated());
+            }
+        } catch (Exception e) {
+            indexingOperationListeners.postIndex(index, e);
+            throw e;
         }
     }
 
@@ -578,12 +583,17 @@ public class IndexShard extends AbstractIndexShardComponent implements IndicesCl
         if (logger.isTraceEnabled()) {
             logger.trace("delete [{}]", delete.uid().text());
         }
-        engine.delete(delete);
-        delete.endTime(System.nanoTime());
-        if (delete.hasFailure()) {
-            indexingOperationListeners.postDelete(delete, delete.getFailure());
-        } else {
-            indexingOperationListeners.postDelete(delete);
+        try {
+            engine.delete(delete);
+            delete.endTime(System.nanoTime());
+            if (delete.hasFailure()) {
+                indexingOperationListeners.postDelete(delete, delete.getFailure());
+            } else {
+                indexingOperationListeners.postDelete(delete);
+            }
+        } catch (Exception e) {
+            indexingOperationListeners.postDelete(delete, e);
+            throw e;
         }
     }
 

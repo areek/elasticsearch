@@ -762,7 +762,7 @@ public abstract class Engine implements Closeable {
         private final VersionType versionType;
         private final Origin origin;
         private Translog.Location location;
-        private ElasticsearchException failure;
+        private Exception failure;
         private final long startTime;
         private long endTime;
 
@@ -813,11 +813,14 @@ public abstract class Engine implements Closeable {
             return failure != null;
         }
 
-        public ElasticsearchException getFailure() {
+        /**
+         * operation specific failure that doesn't fail the engine
+         */
+        public Exception getFailure() {
             return failure;
         }
 
-        public void setFailure(ElasticsearchException failure) {
+        public void setFailure(Exception failure) {
             this.failure = failure;
         }
 
