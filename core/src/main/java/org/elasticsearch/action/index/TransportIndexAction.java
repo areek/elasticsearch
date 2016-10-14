@@ -168,7 +168,7 @@ public class TransportIndexAction extends TransportWriteAction<IndexRequest, Ind
         if (update != null) {
             throw new RetryOnReplicaException(shardId, "Mappings are not available on the replica yet, triggered update: " + update);
         }
-        indexShard.index(operation);
+        indexShard.execute(operation);
         if (operation.hasFailure()) {
             return new ReplicaOperationResult(operation.getFailure());
         } else {
@@ -208,7 +208,7 @@ public class TransportIndexAction extends TransportWriteAction<IndexRequest, Ind
                     "Dynamic mappings are not available on the node that holds the primary yet");
             }
         }
-        indexShard.index(operation);
+        indexShard.execute(operation);
         if (operation.hasFailure()) {
             return new PrimaryOperationResult<>(operation.getFailure());
         } else {
